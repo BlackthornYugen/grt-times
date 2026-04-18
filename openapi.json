@@ -2,12 +2,27 @@
   "openapi": "3.1.0",
   "info": {
     "title": "GRT Vehicle Positions API",
-    "version": "0.1.0"
+    "description": "A proxy service that ingest GTFS-Realtime Protocol Buffer feeds from Grand River Transit (GRT) and exposes them as RESTful JSON endpoints.",
+    "contact": {
+      "name": "API Support",
+      "email": "support@example.com"
+    },
+    "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Local/Relative Server"
+    }
+  ],
   "paths": {
     "/": {
       "get": {
+        "tags": [
+          "Root"
+        ],
         "summary": "Get Root",
+        "description": "Root endpoint welcoming users and providing a basic hint on how to use the API.",
         "operationId": "get_root__get",
         "responses": {
           "200": {
@@ -23,8 +38,73 @@
     },
     "/routes/{route_id}/vehicles": {
       "get": {
+        "tags": [
+          "Vehicles"
+        ],
         "summary": "Get Vehicles By Route",
+        "description": "Returns a collection of currently active vehicles specifically assigned to the requested route ID.",
         "operationId": "get_vehicles_by_route_routes__route_id__vehicles_get",
+        "parameters": [
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Route Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/alerts": {
+      "get": {
+        "tags": [
+          "Alerts"
+        ],
+        "summary": "Get All Alerts",
+        "description": "Returns a full collection of all currently active transit alerts across the entire GRT network.",
+        "operationId": "get_all_alerts_alerts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/routes/{route_id}/alerts": {
+      "get": {
+        "tags": [
+          "Alerts"
+        ],
+        "summary": "Get Alerts By Route",
+        "description": "Returns a collection of active transit alerts filtered dynamically to only ones impacting the requested route ID.",
+        "operationId": "get_alerts_by_route_routes__route_id__alerts_get",
         "parameters": [
           {
             "name": "route_id",
@@ -115,5 +195,19 @@
         "title": "ValidationError"
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "Root",
+      "description": "Core routing and entry points."
+    },
+    {
+      "name": "Vehicles",
+      "description": "Endpoints regarding real-time vehicle positioning."
+    },
+    {
+      "name": "Alerts",
+      "description": "Endpoints regarding active GTFS-RT service alerts."
+    }
+  ]
 }

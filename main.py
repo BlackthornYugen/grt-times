@@ -43,13 +43,49 @@ async def lifespan(app: FastAPI):
     yield
     task.cancel()
 
-app = FastAPI(title="GRT Vehicle Positions API", lifespan=lifespan)
+tags_metadata = [
+    {
+        "name": "Root",
+        "description": "Core routing and entry points."
+    },
+    {
+        "name": "Vehicles",
+        "description": "Endpoints regarding real-time vehicle positioning."
+    },
+    {
+        "name": "Alerts",
+        "description": "Endpoints regarding active GTFS-RT service alerts."
+    }
+]
 
-@app.get("/")
+app = FastAPI(
+    title="GRT Vehicle Positions API",
+    description="A proxy service that ingest GTFS-Realtime Protocol Buffer feeds from Grand River Transit (GRT) and exposes them as RESTful JSON endpoints.",
+    version="1.0.0",
+    contact={
+        "name": "API Support",
+        "email": "support@example.com"
+    },
+    servers=[
+        {"url": "/", "description": "Local/Relative Server"}
+    ],
+    openapi_tags=tags_metadata,
+    lifespan=lifespan
+)
+
+@app.get(
+    "/",
+    tags=["Root"],
+    description="Root endpoint welcoming users and providing a basic hint on how to use the API."
+)
 async def get_root():
     return {"message": "Welcome to the GRT Vehicle Positions Proxy. Try /routes/301/vehicles"}
 
-@app.get("/routes/{route_id}/vehicles")
+@app.get(
+    "/routes/{route_id}/vehicles",
+    tags=["Vehicles"],
+    description="Returns a collection of currently active vehicles specifically assigned to the requested route ID."
+)
 async def get_vehicles_by_route(route_id: str):
     vehicle_type = _route_type_map.get(route_id)
     
@@ -153,12 +189,20 @@ async def get_alerts_data():
     except Exception as exception:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(exception)}")
 
-@app.get("/alerts")
+@app.get(
+    "/alerts",
+    tags=["Alerts"],
+    description="Returns a full collection of all currently active transit alerts across the entire GRT network."
+)
 async def get_all_alerts():
     alerts = await get_alerts_data()
     return {"value": alerts}
 
-@app.get("/routes/{route_id}/alerts")
+@app.get(
+    "/routes/{route_id}/alerts",
+    tags=["Alerts"],
+    description="Returns a collection of active transit alerts filtered dynamically to only ones impacting the requested route ID."
+)
 async def get_alerts_by_route(route_id: str):
     alerts = await get_alerts_data()
     
