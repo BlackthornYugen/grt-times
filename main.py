@@ -45,7 +45,7 @@ app = FastAPI(title="GRT Vehicle Positions API", lifespan=lifespan)
 
 @app.get("/")
 async def get_root():
-    return {"message": "Welcome to the GRT Vehicle Positions Proxy. Try /vehicle/301"}
+    return {"message": "Welcome to the GRT Vehicle Positions Proxy. Try /routes/301/vehicles"}
 
 @app.get("/routes/{route_id}/vehicles")
 async def get_vehicles_by_route(route_id: str):
@@ -81,13 +81,25 @@ async def get_vehicles_by_route(route_id: str):
         except Exception as exception:
             raise HTTPException(status_code=500, detail=f"Internal server error: {str(exception)}")
 
-    # Filter entities for the requested route
-    filtered_entities = []
+    # Clean and filter entities for the requested route
+    cleaned_entities = []
     for entity in data.get("entity", []):
-        if str(entity.get("vehicle", {}).get("trip", {}).get("routeId")) == route_id:
-            filtered_entities.append(entity)
+        vehicle = entity.get("vehicle", {})
+        trip = vehicle.get("trip", {})
+        
+        if str(trip.get("routeId")) == route_id:
+            cleaned_entity = {
+                "id": entity.get("id"),
+                "trip": trip,
+                "position": vehicle.get("position"),
+                "currentStopSequence": vehicle.get("currentStopSequence"),
+                "currentStatus": vehicle.get("currentStatus"),
+                "timestamp": vehicle.get("timestamp")
+            }
+            # Optional: Remove any keys that are None to keep it ultra clean
+            cleaned_entity = {k: v for k, v in cleaned_entity.items() if v is not None}
+            cleaned_entities.append(cleaned_entity)
 
     return {
-        "header": data.get("header", {}),
-        "value": filtered_entities
+        "value": cleaned_entities
     }

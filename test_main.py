@@ -10,7 +10,7 @@ def test_read_root():
     client = TestClient(app)
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json() == {"message": "Welcome to the GRT Vehicle Positions Proxy. Try /vehicle/301"}
+    assert response.json() == {"message": "Welcome to the GRT Vehicle Positions Proxy. Try /routes/301/vehicles"}
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"301": 2})
@@ -36,11 +36,11 @@ def test_read_vehicle_unit(mock_get):
     response = client.get("/routes/301/vehicles")
     assert response.status_code == 200
     data = response.json()
-    assert "header" in data
-    assert data["header"]["gtfsRealtimeVersion"] == "2.0"
+    assert "header" not in data
     assert "value" in data
     assert len(data["value"]) == 1
-    assert data["value"][0]["vehicle"]["trip"]["routeId"] == "301"
+    assert data["value"][0]["id"] == "1"
+    assert data["value"][0]["trip"]["routeId"] == "301"
 
 @pytest.mark.system
 def test_read_vehicle_system():
@@ -53,5 +53,5 @@ def test_read_vehicle_system():
         
         if response.status_code == 200:
             data = response.json()
-            assert "header" in data
+            assert "header" not in data
             assert "value" in data
