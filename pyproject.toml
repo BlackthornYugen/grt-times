@@ -1,0 +1,22 @@
+[project]
+name = "grt-times"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi[standard]>=0.128.8",
+    "gtfs-realtime-bindings>=2.0.0",
+    "httpx>=0.28.1",
+    "uvicorn>=0.39.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "system: mark test as system test",
+]
