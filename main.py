@@ -6,16 +6,23 @@ from google.transit import gtfs_realtime_pb2
 from google.protobuf.json_format import MessageToDict
 import time
 import os
+import zipfile
+import io
+import csv
 
 VEHICLES_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/vehiclepositions"
 ALERTS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/alerts"
 TRIPS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/tripupdates"
+STATIC_GTFS_URL = "https://www.regionofwaterloo.ca/opendatadownloads/GRT_GTFS.zip"
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "2"))
 
 _vehicles_cache = {}
 _trips_cache = {}
 _alerts_cache = {"data": None, "timestamp": 0}
 _route_type_map = {}
+_stops_data = {}
+_static_gtfs_etag = None
+_static_gtfs_last_modified = None
 
 async def fetch_route_map():
     try:
@@ -38,12 +45,63 @@ async def update_route_map_loop():
         await asyncio.sleep(60)
         await fetch_route_map()
 
+async def fetch_static_gtfs():
+    global _static_gtfs_etag, _static_gtfs_last_modified, _stops_data
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {}
+            if _static_gtfs_etag:
+                headers["If-None-Match"] = _static_gtfs_etag
+            if _static_gtfs_last_modified:
+                headers["If-Modified-Since"] = _static_gtfs_last_modified
+            
+            response = await client.get(STATIC_GTFS_URL, headers=headers, timeout=30.0)
+            
+            if response.status_code == 304:
+                return # Not modified, nothing to do
+                
+            if response.status_code == 200:
+                _static_gtfs_etag = response.headers.get("ETag")
+                _static_gtfs_last_modified = response.headers.get("Last-Modified")
+                
+                with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+                    with z.open("stops.txt") as f:
+                        text_wrapper = io.TextIOWrapper(f, encoding='utf-8-sig') # Using utf-8-sig for BOM handling
+                        reader = csv.DictReader(text_wrapper)
+                        new_stops = {}
+                        for row in reader:
+                            stop_id = row.get("stop_id")
+                            new_stops[stop_id] = {
+                                "id": stop_id,
+                                "name": row.get("stop_name"),
+                                "code": row.get("stop_code"),
+                                "latitude": float(row.get("stop_lat")) if row.get("stop_lat") else None,
+                                "longitude": float(row.get("stop_lon")) if row.get("stop_lon") else None,
+                                "locationType": int(row.get("location_type")) if row.get("location_type") else 0,
+                                "parentStation": row.get("parent_station")
+                            }
+                        if new_stops:
+                            _stops_data.clear()
+                            _stops_data.update(new_stops)
+                            print(f"Successfully loaded {len(_stops_data)} stops/stations from GTFS bundle.")
+                            
+    except Exception as e:
+        print(f"Error updating static GTFS data: {e}")
+
+async def update_static_data_loop():
+    while True:
+        await asyncio.sleep(600) # Every 10 minutes
+        await fetch_static_gtfs()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await fetch_route_map()
-    task = asyncio.create_task(update_route_map_loop())
+    await fetch_static_gtfs()
+    task1 = asyncio.create_task(update_route_map_loop())
+    task2 = asyncio.create_task(update_static_data_loop())
     yield
-    task.cancel()
+    task1.cancel()
+    task2.cancel()
 
 tags_metadata = [
     {
@@ -57,6 +115,10 @@ tags_metadata = [
     {
         "name": "Trips",
         "description": "Endpoints for forecasting vehicle arrivals at stops and schedule deviations."
+    },
+    {
+        "name": "Stations",
+        "description": "Endpoints for static definitions of transit hubs, platforms, and specific stops."
     }
 ]
 
@@ -262,3 +324,24 @@ async def get_trips_by_route(route_id: str):
             cleaned_entities.append(cleaned_entity)
 
     return {"value": cleaned_entities}
+
+@app.get(
+    "/stations",
+    tags=["Stations"],
+    description="Returns a collection of all major stations AND bus stops on the GRT network."
+)
+async def get_all_stations():
+    # Because 'Station' commonly colloquially refers to bus stops, we'll return all stops.
+    # We strip out nulls manually directly before transmission.
+    return {"value": [{k: v for k, v in stop.items() if v is not None} for stop in _stops_data.values()]}
+
+@app.get(
+    "/stations/{station_id}",
+    tags=["Stations"],
+    description="Look up a specific station or stop physically by its unique ID."
+)
+async def get_station_by_id(station_id: str):
+    stop = _stops_data.get(station_id)
+    if stop:
+        return {k: v for k, v in stop.items() if v is not None}
+    raise HTTPException(status_code=404, detail="Station or Stop not found.")
