@@ -1,0 +1,4 @@
+extends:
+  - "spectral:oas"
+  # For example, if you want to downgrade an error to a warning:
+  # azure-api-guidelines-pattern-rule: warn
