@@ -7,17 +7,19 @@ from google.protobuf.json_format import MessageToDict
 import time
 import os
 
-BASE_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/vehiclepositions"
+VEHICLES_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/vehiclepositions"
+ALERTS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/alerts"
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "2"))
 
-_cache = {}
+_vehicles_cache = {}
+_alerts_cache = {"data": None, "timestamp": 0}
 _route_type_map = {}
 
 async def fetch_route_map():
     try:
         async with httpx.AsyncClient() as client:
             for vtype in (1, 2):
-                response = await client.get(f"{BASE_URL}/{vtype}", timeout=10.0)
+                response = await client.get(f"{VEHICLES_URL}/{vtype}", timeout=10.0)
                 if response.status_code == 200:
                     feed = gtfs_realtime_pb2.FeedMessage()
                     feed.ParseFromString(response.content)
@@ -59,22 +61,22 @@ async def get_vehicles_by_route(route_id: str):
     current_time = time.time()
     data = None
     
-    if vehicle_type in _cache:
-        cached_data, timestamp = _cache[vehicle_type]
+    if vehicle_type in _vehicles_cache:
+        cached_data, timestamp = _vehicles_cache[vehicle_type]
         if current_time - timestamp < CACHE_TTL_SECONDS:
             data = cached_data
 
     if not data:
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(f"{BASE_URL}/{vehicle_type}", timeout=10.0)
+                response = await client.get(f"{VEHICLES_URL}/{vehicle_type}", timeout=10.0)
                 response.raise_for_status()
                 
                 feed = gtfs_realtime_pb2.FeedMessage()
                 feed.ParseFromString(response.content)
                 
                 fetched_data = MessageToDict(feed)
-                _cache[vehicle_type] = (fetched_data, current_time)
+                _vehicles_cache[vehicle_type] = (fetched_data, current_time)
                 data = fetched_data
         except httpx.HTTPError as http_error:
             raise HTTPException(status_code=502, detail=f"Error communicating with GRT API: {str(http_error)}")
@@ -103,3 +105,68 @@ async def get_vehicles_by_route(route_id: str):
     return {
         "value": cleaned_entities
     }
+
+async def get_alerts_data():
+    current_time = time.time()
+    
+    if _alerts_cache["data"] is not None and (current_time - _alerts_cache["timestamp"]) < CACHE_TTL_SECONDS:
+        return _alerts_cache["data"]
+        
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(ALERTS_URL, timeout=10.0)
+            response.raise_for_status()
+            
+            feed = gtfs_realtime_pb2.FeedMessage()
+            feed.ParseFromString(response.content)
+            fetched_data = MessageToDict(feed)
+            
+            cleaned_alerts = []
+            for entity in fetched_data.get("entity", []):
+                alert_obj = entity.get("alert", {})
+                
+                header_text = None
+                translations = alert_obj.get("headerText", {}).get("translation", [])
+                for t in translations:
+                    if t.get("language") == "en":
+                        header_text = t.get("text")
+                        break
+                if not header_text and translations:
+                    header_text = translations[0].get("text")
+                    
+                cleaned_alert = {
+                    "id": entity.get("id"),
+                    "cause": alert_obj.get("cause"),
+                    "effect": alert_obj.get("effect"),
+                    "headerText": header_text,
+                    "informedEntities": alert_obj.get("informedEntity", [])
+                }
+                cleaned_alert = {k: v for k, v in cleaned_alert.items() if v is not None}
+                cleaned_alerts.append(cleaned_alert)
+                
+            _alerts_cache["data"] = cleaned_alerts
+            _alerts_cache["timestamp"] = current_time
+            return cleaned_alerts
+            
+    except httpx.HTTPError as http_error:
+        raise HTTPException(status_code=502, detail=f"Error communicating with GRT API: {str(http_error)}")
+    except Exception as exception:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(exception)}")
+
+@app.get("/alerts")
+async def get_all_alerts():
+    alerts = await get_alerts_data()
+    return {"value": alerts}
+
+@app.get("/routes/{route_id}/alerts")
+async def get_alerts_by_route(route_id: str):
+    alerts = await get_alerts_data()
+    
+    filtered_alerts = []
+    for alert in alerts:
+        # Check if route_id is in any of the informedEntities
+        informed_entities = alert.get("informedEntities", [])
+        if any(str(ie.get("routeId")) == route_id for ie in informed_entities):
+            filtered_alerts.append(alert)
+            
+    return {"value": filtered_alerts}
