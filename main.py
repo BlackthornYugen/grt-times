@@ -9,9 +9,11 @@ import os
 
 VEHICLES_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/vehiclepositions"
 ALERTS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/alerts"
+TRIPS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/tripupdates"
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "2"))
 
 _vehicles_cache = {}
+_trips_cache = {}
 _alerts_cache = {"data": None, "timestamp": 0}
 _route_type_map = {}
 
@@ -51,6 +53,10 @@ tags_metadata = [
     {
         "name": "Alerts",
         "description": "Endpoints regarding active GTFS-RT service alerts."
+    },
+    {
+        "name": "Trips",
+        "description": "Endpoints for forecasting vehicle arrivals at stops and schedule deviations."
     }
 ]
 
@@ -203,3 +209,56 @@ async def get_alerts_by_route(route_id: str):
             filtered_alerts.append(alert)
             
     return {"value": filtered_alerts}
+
+@app.get(
+    "/routes/{route_id}/trips",
+    tags=["Trips"],
+    description="Returns an array of ETA updates and stop schedules for all presently active vehicle trips on the requested route ID."
+)
+async def get_trips_by_route(route_id: str):
+    vehicle_type = _route_type_map.get(route_id)
+    if not vehicle_type:
+        return {"value": []}
+
+    current_time = time.time()
+    data = None
+    
+    if vehicle_type in _trips_cache:
+        cached_data, timestamp = _trips_cache[vehicle_type]
+        if current_time - timestamp < CACHE_TTL_SECONDS:
+            data = cached_data
+
+    if not data:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{TRIPS_URL}/{vehicle_type}", timeout=10.0)
+                response.raise_for_status()
+                
+                feed = gtfs_realtime_pb2.FeedMessage()
+                feed.ParseFromString(response.content)
+                
+                fetched_data = MessageToDict(feed)
+                _trips_cache[vehicle_type] = (fetched_data, current_time)
+                data = fetched_data
+        except httpx.HTTPError as http_error:
+            raise HTTPException(status_code=502, detail=f"Error communicating with GRT API: {str(http_error)}")
+        except Exception as exception:
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(exception)}")
+
+    cleaned_entities = []
+    for entity in data.get("entity", []):
+        trip_update = entity.get("tripUpdate", {})
+        trip = trip_update.get("trip", {})
+        
+        if str(trip.get("routeId")) == route_id:
+            cleaned_entity = {
+                "id": entity.get("id"),
+                "trip": trip,
+                "vehicle": trip_update.get("vehicle"),
+                "stopTimeUpdate": trip_update.get("stopTimeUpdate", []),
+                "timestamp": trip_update.get("timestamp")
+            }
+            cleaned_entity = {k: v for k, v in cleaned_entity.items() if v is not None}
+            cleaned_entities.append(cleaned_entity)
+
+    return {"value": cleaned_entities}

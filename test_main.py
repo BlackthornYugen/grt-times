@@ -8,8 +8,9 @@ from google.transit import gtfs_realtime_pb2
 @pytest.fixture(autouse=True)
 def clear_caches():
     """Ensure caches are empty before each test so we don't bleed mock data into system tests."""
-    from main import _vehicles_cache, _alerts_cache
+    from main import _vehicles_cache, _alerts_cache, _trips_cache
     _vehicles_cache.clear()
+    _trips_cache.clear()
     _alerts_cache.update({"data": None, "timestamp": 0})
     yield
 
@@ -112,6 +113,51 @@ def test_read_alerts_system():
     """System test for alerts."""
     with TestClient(app) as client:
         response = client.get("/alerts")
+        assert response.status_code in [200, 502]
+        if response.status_code == 200:
+            assert "value" in response.json()
+
+@patch("main.httpx.AsyncClient.get")
+@patch.dict("main._route_type_map", {"201": 1})
+def test_read_trips_unit(mock_get):
+    """Unit test for trips endpoints."""
+    # Create fake protobuf response
+    feed = gtfs_realtime_pb2.FeedMessage()
+    header = feed.header
+    header.gtfs_realtime_version = "2.0"
+    
+    entity = feed.entity.add()
+    entity.id = "trip_update_1"
+    entity.trip_update.trip.route_id = "201"
+    entity.trip_update.trip.trip_id = "trip_456"
+    
+    stu = entity.trip_update.stop_time_update.add()
+    stu.stop_sequence = 1
+    stu.arrival.time = 999999999
+    stu.stop_id = "stop_789"
+
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.content = feed.SerializeToString()
+    mock_response.raise_for_status = MagicMock(return_value=None)
+    
+    mock_get.return_value = mock_response
+
+    client = TestClient(app)
+    response = client.get("/routes/201/trips")
+    assert response.status_code == 200
+    data = response.json()
+    assert "value" in data
+    assert len(data["value"]) == 1
+    assert data["value"][0]["id"] == "trip_update_1"
+    assert data["value"][0]["trip"]["routeId"] == "201"
+    assert data["value"][0]["stopTimeUpdate"][0]["stopId"] == "stop_789"
+
+@pytest.mark.system
+def test_read_trips_system():
+    """System test for trips."""
+    with TestClient(app) as client:
+        response = client.get("/routes/301/trips")
         assert response.status_code in [200, 502]
         if response.status_code == 200:
             assert "value" in response.json()
