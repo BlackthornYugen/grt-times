@@ -45,10 +45,6 @@ async def lifespan(app: FastAPI):
 
 tags_metadata = [
     {
-        "name": "Root",
-        "description": "Core routing and entry points."
-    },
-    {
         "name": "Vehicles",
         "description": "Endpoints regarding real-time vehicle positioning."
     },
@@ -70,16 +66,9 @@ app = FastAPI(
         {"url": "/", "description": "Local/Relative Server"}
     ],
     openapi_tags=tags_metadata,
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/"
 )
-
-@app.get(
-    "/",
-    tags=["Root"],
-    description="Root endpoint welcoming users and providing a basic hint on how to use the API."
-)
-async def get_root():
-    return {"message": "Welcome to the GRT Vehicle Positions Proxy. Try /routes/301/vehicles"}
 
 @app.get(
     "/routes/{route_id}/vehicles",

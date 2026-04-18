@@ -13,13 +13,6 @@ def clear_caches():
     _alerts_cache.update({"data": None, "timestamp": 0})
     yield
 
-def test_read_root():
-    """Unit test for the root endpoint."""
-    client = TestClient(app)
-    response = client.get("/")
-    assert response.status_code == 200
-    assert response.json() == {"message": "Welcome to the GRT Vehicle Positions Proxy. Try /routes/301/vehicles"}
-
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"301": 2})
 def test_read_vehicle_unit(mock_get):
