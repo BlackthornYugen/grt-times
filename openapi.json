@@ -1,11 +1,11 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "GRT Vehicle Positions API",
-    "description": "A proxy service that ingest GTFS-Realtime Protocol Buffer feeds from Grand River Transit (GRT) and exposes them as RESTful JSON endpoints.",
+    "title": "GRT Transit API",
+    "description": "A proxy service that ingests GTFS-Realtime Protocol Buffer feeds from Grand River Transit (GRT) and exposes them as RESTful JSON endpoints.\n\nThis API is designed in accordance with the [Microsoft Graph REST API Guidelines](https://github.com/microsoft/api-guidelines/blob/vNext/graph/GuidelinesGraph.md).",
     "contact": {
-      "name": "API Support",
-      "email": "support@example.com"
+      "name": "John Steel",
+      "email": "john@steelcomputers.com"
     },
     "version": "1.0.0"
   },
@@ -165,14 +165,65 @@
           "Stations"
         ],
         "summary": "Get All Stations",
-        "description": "Returns a collection of all major stations AND bus stops on the GRT network.",
+        "description": "Returns a collection of stops and stations on the GRT network. Defaults to `locationType=0` (individual stops/platforms). Pass `locationType=1` to retrieve parent station records instead. Supports `$top` and `$skip` for pagination.",
         "operationId": "get_all_stations_stations_get",
+        "parameters": [
+          {
+            "name": "$top",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "$Top"
+            }
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "$Skip"
+            }
+          },
+          {
+            "name": "locationType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Locationtype"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -185,7 +236,7 @@
           "Stations"
         ],
         "summary": "Get Station By Id",
-        "description": "Look up a specific station or stop physically by its unique ID.",
+        "description": "Look up a specific station or stop by its unique ID.",
         "operationId": "get_station_by_id_stations__station_id__get",
         "parameters": [
           {

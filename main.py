@@ -230,10 +230,10 @@ async def get_vehicles_by_route(route_id: str):
         raw_trip = vehicle.get("trip", {})
 
         if str(raw_trip.get("routeId")) == route_id:
-            cleaned_trip = {k: v for k, v in raw_trip.items() if k not in ("routeId", "startDate", "startTime")}
+            cleaned_trip = {k: v for k, v in raw_trip.items() if k not in ("routeId", "tripId", "startDate", "startTime")}
             iso_dt = _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", ""))
             if iso_dt:
-                cleaned_trip["departureDateTime"] = iso_dt
+                cleaned_trip["tripStartDateTime"] = iso_dt
 
             ts = vehicle.get("timestamp")
             cleaned_entity = {
@@ -362,11 +362,11 @@ async def get_trips_by_route(route_id: str):
         raw_trip = trip_update.get("trip", {})
 
         if str(raw_trip.get("routeId")) == route_id:
-            # Build trip sub-object: remove routeId, combine startDate+startTime
-            cleaned_trip = {k: v for k, v in raw_trip.items() if k not in ("routeId", "startDate", "startTime")}
+            # Build trip sub-object: remove routeId and tripId (duplicates entity id), combine startDate+startTime
+            cleaned_trip = {k: v for k, v in raw_trip.items() if k not in ("routeId", "tripId", "startDate", "startTime")}
             iso_dt = _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", ""))
             if iso_dt:
-                cleaned_trip["departureDateTime"] = iso_dt
+                cleaned_trip["tripStartDateTime"] = iso_dt
 
             # Flatten vehicle object to vehicleId scalar
             vehicle = trip_update.get("vehicle")
