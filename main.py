@@ -6,6 +6,7 @@ import re
 from typing import Optional
 from zoneinfo import ZoneInfo
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import httpx
 from google.transit import gtfs_realtime_pb2
@@ -282,6 +283,16 @@ app = FastAPI(
     openapi_tags=tags_metadata,
     lifespan=lifespan,
     docs_url="/",
+)
+
+# Reflect the request Origin back so Swagger UI on any agency domain can call
+# any other agency domain. allow_origin_regex causes Starlette to echo the
+# actual Origin header rather than responding with *.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r".*",
+    allow_methods=["GET"],
+    allow_headers=["Accept"],
 )
 
 _HTTP_STATUS_CODES = {
