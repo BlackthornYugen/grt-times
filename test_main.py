@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
-from main import app, _gtfs_datetime_to_iso, _unix_to_iso, _unix_to_eastern_iso
+from main import app, _DEFAULT_AGENCY, _gtfs_datetime_to_iso, _unix_to_iso, _unix_to_eastern_iso
 import httpx
 from google.transit import gtfs_realtime_pb2
 
@@ -12,23 +12,22 @@ from google.transit import gtfs_realtime_pb2
 @pytest.fixture(autouse=True)
 def clear_caches():
     """Reset all caches and stop data before each test."""
-    from main import _vehicles_cache, _alerts_cache, _trips_cache, _stops_data
-    _vehicles_cache.clear()
-    _trips_cache.clear()
-    _alerts_cache.update({"data": None, "timestamp": 0})
-    _stops_data.clear()
+    _DEFAULT_AGENCY.vehicles_cache.clear()
+    _DEFAULT_AGENCY.trips_cache.clear()
+    _DEFAULT_AGENCY.alerts_cache.update({"data": None, "timestamp": 0})
+    _DEFAULT_AGENCY.stops_data.clear()
+    _DEFAULT_AGENCY.route_feed_map.clear()
     yield
 
 @pytest.fixture
 def stops_data():
-    """Populate _stops_data with a few representative entries."""
-    from main import _stops_data
-    _stops_data.update({
+    """Populate stops_data with a few representative entries."""
+    _DEFAULT_AGENCY.stops_data.update({
         "1001": {"id": "1001", "name": "King / University", "code": "1001", "latitude": 43.47, "longitude": -80.52, "locationType": 0, "parentStation": ""},
         "1002": {"id": "1002", "name": "Uptown", "code": "1002", "latitude": 43.45, "longitude": -80.49, "locationType": 0, "parentStation": ""},
         "place_KUN": {"id": "place_KUN", "name": "King/University (parent)", "code": "", "latitude": 43.47, "longitude": -80.52, "locationType": 1, "parentStation": ""},
     })
-    return _stops_data
+    return _DEFAULT_AGENCY.stops_data
 
 
 def _make_vehicle_feed(route_id="301", entity_id="1", start_date="20260418", start_time="23:40:00", timestamp=1776570362):
@@ -116,7 +115,7 @@ def test_unix_to_eastern_iso_invalid():
 # ---------------------------------------------------------------------------
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"301": 2})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"301": "rail"})
 def test_vehicles_basic_shape(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed())
     data = TestClient(app).get("/routes/301/vehicles").json()
@@ -124,7 +123,7 @@ def test_vehicles_basic_shape(mock_get):
     assert len(data["value"]) == 1
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"301": 2})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"301": "rail"})
 def test_vehicles_trip_id_not_duplicated(mock_get):
     """tripId must not appear in trip sub-object — it duplicates the top-level id."""
     mock_get.return_value = _mock_response(_make_vehicle_feed(entity_id="1"))
@@ -133,14 +132,14 @@ def test_vehicles_trip_id_not_duplicated(mock_get):
     assert "trip" not in entity
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"301": 2})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"301": "rail"})
 def test_vehicles_no_route_id_in_response(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed())
     entity = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
     assert "routeId" not in entity
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"301": 2})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"301": "rail"})
 def test_vehicles_trip_start_date_time(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed(start_date="20260418", start_time="23:40:00"))
     entity = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
@@ -149,14 +148,14 @@ def test_vehicles_trip_start_date_time(mock_get):
     assert "startTime" not in entity
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"301": 2})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"301": "rail"})
 def test_vehicles_trip_start_date_time_overnight(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed(start_date="20260418", start_time="25:10:00"))
     entity = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
     assert entity["tripStartDateTime"] == "2026-04-19T01:10:00-04:00"
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"301": 2})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"301": "rail"})
 def test_vehicles_timestamp_is_iso8601(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed(timestamp=0))
     vehicle = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
@@ -168,7 +167,7 @@ def test_vehicles_timestamp_is_iso8601(mock_get):
 # ---------------------------------------------------------------------------
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_basic_shape(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed())
     data = TestClient(app).get("/routes/201/trips").json()
@@ -176,7 +175,7 @@ def test_trips_basic_shape(mock_get):
     assert len(data["value"]) == 1
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_stop_time_updates_plural_key(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed())
     entity = TestClient(app).get("/routes/201/trips").json()["value"][0]
@@ -184,7 +183,7 @@ def test_trips_stop_time_updates_plural_key(mock_get):
     assert "stopTimeUpdate" not in entity
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_trip_id_not_duplicated(mock_get):
     """tripId must not appear in trip sub-object — it duplicates the top-level id."""
     mock_get.return_value = _mock_response(_make_trips_feed())
@@ -194,14 +193,14 @@ def test_trips_trip_id_not_duplicated(mock_get):
     assert "trip" not in entity
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_no_route_id_in_response(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed())
     entity = TestClient(app).get("/routes/201/trips").json()["value"][0]
     assert "routeId" not in entity
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_trip_start_date_time(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed(start_date="20260418", start_time="10:00:00"))
     entity = TestClient(app).get("/routes/201/trips").json()["value"][0]
@@ -210,7 +209,7 @@ def test_trips_trip_start_date_time(mock_get):
     assert "startTime" not in entity
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_vehicle_id_flat(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed(vehicle_id="512"))
     entity = TestClient(app).get("/routes/201/trips").json()["value"][0]
@@ -218,7 +217,7 @@ def test_trips_vehicle_id_flat(mock_get):
     assert "vehicle" not in entity
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_stop_is_nested_object(mock_get, stops_data):
     mock_get.return_value = _mock_response(_make_trips_feed(stop_id="1001"))
     update = TestClient(app).get("/routes/201/trips").json()["value"][0]["stopTimeUpdates"][0]
@@ -229,16 +228,16 @@ def test_trips_stop_is_nested_object(mock_get, stops_data):
     assert "longitude" in update["stop"]
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_stop_unknown_id_still_returns_id(mock_get):
-    """A stopId not in _stops_data should still surface as stop.id."""
+    """A stopId not in stops_data should still surface as stop.id."""
     mock_get.return_value = _mock_response(_make_trips_feed(stop_id="unknown_99"))
     update = TestClient(app).get("/routes/201/trips").json()["value"][0]["stopTimeUpdates"][0]
     assert update["stop"]["id"] == "unknown_99"
     assert "name" not in update["stop"]
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"201": 1})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"201": "bus"})
 def test_trips_arrival_departure_are_flat_eastern(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed(arrival_time=0))
     update = TestClient(app).get("/routes/201/trips").json()["value"][0]["stopTimeUpdates"][0]
@@ -252,7 +251,6 @@ def test_trips_arrival_departure_are_flat_eastern(mock_get):
 # ---------------------------------------------------------------------------
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"301": 2})
 def test_alerts_basic(mock_get):
     feed = gtfs_realtime_pb2.FeedMessage()
     feed.header.gtfs_realtime_version = "2.0"
@@ -290,7 +288,7 @@ def test_error_404_graph_format():
     assert "message" in body["error"]
 
 @patch("main.httpx.AsyncClient.get")
-@patch.dict("main._route_type_map", {"301": 2})
+@patch.dict(_DEFAULT_AGENCY.route_feed_map, {"301": "rail"})
 def test_error_502_graph_format(mock_get):
     mock_get.side_effect = httpx.ConnectError("upstream down")
     resp = TestClient(app).get("/routes/301/vehicles")
