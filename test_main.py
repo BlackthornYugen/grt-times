@@ -74,14 +74,18 @@ def _mock_response(feed):
 # ---------------------------------------------------------------------------
 
 def test_gtfs_datetime_to_iso_normal():
-    assert _gtfs_datetime_to_iso("20260418", "23:40:00") == "2026-04-18T23:40:00"
+    assert _gtfs_datetime_to_iso("20260418", "23:40:00") == "2026-04-18T23:40:00-04:00"  # EDT
 
 def test_gtfs_datetime_to_iso_overflow():
     """Times ≥ 24h (overnight trips) must roll the date forward."""
-    assert _gtfs_datetime_to_iso("20260418", "25:30:00") == "2026-04-19T01:30:00"
+    assert _gtfs_datetime_to_iso("20260418", "25:30:00") == "2026-04-19T01:30:00-04:00"  # EDT
 
 def test_gtfs_datetime_to_iso_midnight_boundary():
-    assert _gtfs_datetime_to_iso("20260418", "24:00:00") == "2026-04-19T00:00:00"
+    assert _gtfs_datetime_to_iso("20260418", "24:00:00") == "2026-04-19T00:00:00-04:00"  # EDT
+
+def test_gtfs_datetime_to_iso_winter():
+    """Winter dates use EST offset (-05:00)."""
+    assert _gtfs_datetime_to_iso("20260118", "08:00:00") == "2026-01-18T08:00:00-05:00"  # EST
 
 def test_gtfs_datetime_to_iso_invalid():
     assert _gtfs_datetime_to_iso("bad", "also:bad:x") is None
@@ -114,30 +118,30 @@ def test_vehicles_trip_id_not_duplicated(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed(entity_id="1"))
     entity = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
     assert entity["id"] == "1"
-    assert "tripId" not in entity.get("trip", {})
+    assert "trip" not in entity
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"301": 2})
-def test_vehicles_no_route_id_in_trip(mock_get):
+def test_vehicles_no_route_id_in_response(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed())
-    vehicle = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
-    assert "routeId" not in vehicle["trip"]
+    entity = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
+    assert "routeId" not in entity
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"301": 2})
-def test_vehicles_departure_datetime(mock_get):
+def test_vehicles_trip_start_date_time(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed(start_date="20260418", start_time="23:40:00"))
-    trip = TestClient(app).get("/routes/301/vehicles").json()["value"][0]["trip"]
-    assert trip["tripStartDateTime"] == "2026-04-18T23:40:00"
-    assert "startDate" not in trip
-    assert "startTime" not in trip
+    entity = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
+    assert entity["tripStartDateTime"] == "2026-04-18T23:40:00-04:00"
+    assert "startDate" not in entity
+    assert "startTime" not in entity
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"301": 2})
-def test_vehicles_departure_datetime_overnight(mock_get):
+def test_vehicles_trip_start_date_time_overnight(mock_get):
     mock_get.return_value = _mock_response(_make_vehicle_feed(start_date="20260418", start_time="25:10:00"))
-    trip = TestClient(app).get("/routes/301/vehicles").json()["value"][0]["trip"]
-    assert trip["tripStartDateTime"] == "2026-04-19T01:10:00"
+    entity = TestClient(app).get("/routes/301/vehicles").json()["value"][0]
+    assert entity["tripStartDateTime"] == "2026-04-19T01:10:00-04:00"
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"301": 2})
@@ -174,23 +178,24 @@ def test_trips_trip_id_not_duplicated(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed())
     entity = TestClient(app).get("/routes/201/trips").json()["value"][0]
     assert entity["id"] == "trip_1"
-    assert "tripId" not in entity.get("trip", {})
+    assert "tripId" not in entity
+    assert "trip" not in entity
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"201": 1})
-def test_trips_no_route_id_in_trip(mock_get):
+def test_trips_no_route_id_in_response(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed())
-    trip = TestClient(app).get("/routes/201/trips").json()["value"][0]["trip"]
-    assert "routeId" not in trip
+    entity = TestClient(app).get("/routes/201/trips").json()["value"][0]
+    assert "routeId" not in entity
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"201": 1})
-def test_trips_departure_datetime(mock_get):
+def test_trips_trip_start_date_time(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed(start_date="20260418", start_time="10:00:00"))
-    trip = TestClient(app).get("/routes/201/trips").json()["value"][0]["trip"]
-    assert trip["tripStartDateTime"] == "2026-04-18T10:00:00"
-    assert "startDate" not in trip
-    assert "startTime" not in trip
+    entity = TestClient(app).get("/routes/201/trips").json()["value"][0]
+    assert entity["tripStartDateTime"] == "2026-04-18T10:00:00-04:00"
+    assert "startDate" not in entity
+    assert "startTime" not in entity
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"201": 1})

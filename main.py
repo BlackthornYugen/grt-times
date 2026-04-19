@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 import httpx
@@ -23,13 +24,16 @@ try:
 except ssl.SSLError:
     pass
 
+_EASTERN = ZoneInfo("America/Toronto")
+
 def _gtfs_datetime_to_iso(start_date: str, start_time: str) -> Optional[str]:
-    """Combine GTFS startDate (YYYYMMDD) and startTime (HH:MM:SS) into ISO 8601.
+    """Combine GTFS startDate (YYYYMMDD) and startTime (HH:MM:SS) into ISO 8601 with Eastern offset.
     startTime may exceed 24 hours for overnight trips (e.g. '25:30:00')."""
     try:
         base = datetime.strptime(start_date, "%Y%m%d")
         h, m, s = (int(x) for x in start_time.split(":"))
-        return (base + timedelta(hours=h, minutes=m, seconds=s)).strftime("%Y-%m-%dT%H:%M:%S")
+        naive = base + timedelta(hours=h, minutes=m, seconds=s)
+        return naive.replace(tzinfo=_EASTERN).isoformat(timespec="seconds")
     except (ValueError, AttributeError):
         return None
 
@@ -230,15 +234,10 @@ async def get_vehicles_by_route(route_id: str):
         raw_trip = vehicle.get("trip", {})
 
         if str(raw_trip.get("routeId")) == route_id:
-            cleaned_trip = {k: v for k, v in raw_trip.items() if k not in ("routeId", "tripId", "startDate", "startTime")}
-            iso_dt = _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", ""))
-            if iso_dt:
-                cleaned_trip["tripStartDateTime"] = iso_dt
-
             ts = vehicle.get("timestamp")
             cleaned_entity = {
                 "id": entity.get("id"),
-                "trip": cleaned_trip or None,
+                "tripStartDateTime": _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", "")),
                 "position": vehicle.get("position"),
                 "currentStopSequence": vehicle.get("currentStopSequence"),
                 "currentStatus": vehicle.get("currentStatus"),
@@ -362,12 +361,6 @@ async def get_trips_by_route(route_id: str):
         raw_trip = trip_update.get("trip", {})
 
         if str(raw_trip.get("routeId")) == route_id:
-            # Build trip sub-object: remove routeId and tripId (duplicates entity id), combine startDate+startTime
-            cleaned_trip = {k: v for k, v in raw_trip.items() if k not in ("routeId", "tripId", "startDate", "startTime")}
-            iso_dt = _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", ""))
-            if iso_dt:
-                cleaned_trip["tripStartDateTime"] = iso_dt
-
             # Flatten vehicle object to vehicleId scalar
             vehicle = trip_update.get("vehicle")
             vehicle_id = vehicle.get("id") if vehicle else None
@@ -405,7 +398,7 @@ async def get_trips_by_route(route_id: str):
             ts = trip_update.get("timestamp")
             cleaned_entity = {
                 "id": entity.get("id"),
-                "trip": cleaned_trip or None,
+                "tripStartDateTime": _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", "")),
                 "vehicleId": vehicle_id,
                 "stopTimeUpdates": stop_updates,
                 "timestamp": _unix_to_iso(ts) if ts else None,
