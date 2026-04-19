@@ -35,8 +35,22 @@ ingress:
   tls: []
 
 env: []
+  # Plain env vars — safe for non-sensitive config.
   # - name: CACHE_TTL_SECONDS
   #   value: "2"
+  # - name: TRANSIT_TTC_HOST_REGEX
+  #   value: "^ttc\\."
+  # - name: TRANSIT_OCT_HOST_REGEX
+  #   value: "^oct\\."
+
+# Mount all keys from a pre-existing Secret as env vars.
+# Create the secret first:
+#   kubectl create secret generic grt-times-secrets \
+#     --from-literal=TRANSIT_TTC_API_KEY=xxx \
+#     --from-literal=TRANSIT_OCT_API_KEY=xxx
+envFrom: []
+  # - secretRef:
+  #     name: grt-times-secrets
 
 resources: {}
 

@@ -241,7 +241,7 @@ async def update_static_data_loop(state: AgencyState):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     tasks = []
-    for state in _AGENCY_REGISTRY.values():
+    for _, state in _AGENCY_REGISTRY:
         await fetch_route_map(state)
         await fetch_static_gtfs(state)
         tasks.append(asyncio.create_task(update_route_map_loop(state)))

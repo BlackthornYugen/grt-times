@@ -1,8 +1,16 @@
-# GRT Vehicle Positions API
+# Transit API
 
-The GRT Vehicle Positions Proxy is a fast, lightweight API built with [FastAPI](https://fastapi.tiangolo.com/) that ingests GTFS-Realtime Protocol Buffer feeds from the Grand River Transit (GRT) system in Waterloo Region and serves slim, cleanly-mapped JSON payloads.
+A fast, lightweight proxy built with [FastAPI](https://fastapi.tiangolo.com/) that ingests GTFS-Realtime Protocol Buffer feeds from multiple transit agencies and serves clean JSON REST responses modeled on Microsoft Graph API conventions.
 
-This microservice intelligently classifies GRT routes automatically and models endpoints based on Microsoft Graph API Resource Modeling conventions.
+Supported agencies (routed by `Host` header):
+
+| Host prefix | Agency |
+|---|---|
+| `grt.*` | Grand River Transit (Waterloo Region) |
+| `ttc.*` | Toronto Transit Commission |
+| `oct.*` | OC Transpo (Ottawa) |
+
+Unknown hosts fall back to GRT.
 
 ## Getting Started
 
@@ -51,6 +59,56 @@ The project is natively configured for the `pytest` test runner. It includes loc
 ```bash
 uv run pytest
 ```
+
+## Deployment (Helm)
+
+The chart lives in `chart/`. A values override file is the recommended way to deploy — keep it out of version control since it will reference secret names.
+
+### 1. Create the API key secret
+
+TTC and OC Transpo require API keys. Create a Kubernetes Secret **before** installing the chart so Helm never needs to see the values:
+
+```bash
+kubectl create secret generic transit-api-secrets \
+  --from-literal=TRANSIT_TTC_API_KEY=your_ttc_key \
+  --from-literal=TRANSIT_OCT_API_KEY=your_octranspo_key
+```
+
+### 2. Create a values override
+
+```yaml
+# values.override.yaml
+image:
+  repository: your-registry/transit-api
+  tag: "latest"
+  pullPolicy: Always
+
+envFrom:
+  - secretRef:
+      name: transit-api-secrets
+
+# Optional — override host regex or cache TTL
+env:
+  - name: CACHE_TTL_SECONDS
+    value: "5"
+```
+
+### 3. Install / upgrade
+
+```bash
+helm upgrade --install grt-times ./chart -f values.override.yaml
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `TRANSIT_TTC_API_KEY` | — | TTC feed API key |
+| `TRANSIT_OCT_API_KEY` | — | OC Transpo feed API key |
+| `TRANSIT_GRT_HOST_REGEX` | `^grt\.` | Regex matched against `Host` to route to GRT |
+| `TRANSIT_TTC_HOST_REGEX` | `^ttc\.` | Regex matched against `Host` to route to TTC |
+| `TRANSIT_OCT_HOST_REGEX` | `^oct\.` | Regex matched against `Host` to route to OCTranspo |
+| `CACHE_TTL_SECONDS` | `2` | Live feed cache TTL in seconds |
 
 ## Linting & API Standards
 
