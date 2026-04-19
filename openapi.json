@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "GRT Transit API",
-    "description": "A proxy service that ingests GTFS-Realtime Protocol Buffer feeds from Grand River Transit (GRT) and exposes them as RESTful JSON endpoints.\n\nThis API is designed in accordance with the [Microsoft Graph REST API Guidelines](https://github.com/microsoft/api-guidelines/blob/vNext/graph/GuidelinesGraph.md).",
+    "title": "Transit API",
+    "description": "A proxy service that ingests GTFS-Realtime Protocol Buffer feeds from transit agencies and exposes them as RESTful JSON endpoints.\n\nThis API is designed in accordance with the [Microsoft Graph REST API Guidelines](https://github.com/microsoft/api-guidelines/blob/vNext/graph/GuidelinesGraph.md).",
     "contact": {
       "name": "John Steel",
       "email": "john@steelcomputers.com"
@@ -12,7 +12,19 @@
   "servers": [
     {
       "url": "/",
-      "description": "Local/Relative Server"
+      "description": "Local/Relative"
+    },
+    {
+      "url": "https://grt.jskw.ca",
+      "description": "Grand River Transit"
+    },
+    {
+      "url": "https://ttc.jskw.ca",
+      "description": "Toronto Transit Commission"
+    },
+    {
+      "url": "https://oct.jskw.ca",
+      "description": "OC Transpo"
     }
   ],
   "paths": {
@@ -63,7 +75,7 @@
           "Alerts"
         ],
         "summary": "Get All Alerts",
-        "description": "Returns a full collection of all currently active transit alerts across the entire GRT network.",
+        "description": "Returns a full collection of all currently active transit alerts across the entire network.",
         "operationId": "get_all_alerts_alerts_get",
         "responses": {
           "200": {
@@ -159,13 +171,66 @@
         }
       }
     },
+    "/stations/{station_id}/arrivals": {
+      "get": {
+        "tags": [
+          "Trips"
+        ],
+        "summary": "Get Arrivals At Station",
+        "description": "Returns upcoming arrivals at a specific stop across all active trips, sorted by arrival time. Excludes arrivals more than 60 seconds in the past and any stops marked as skipped.",
+        "operationId": "get_arrivals_at_station_stations__station_id__arrivals_get",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Station Id"
+            }
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 10,
+              "title": "$Top"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/stations": {
       "get": {
         "tags": [
           "Stations"
         ],
         "summary": "Get All Stations",
-        "description": "Returns a collection of stops and stations on the GRT network. Defaults to `locationType=0` (individual stops/platforms). Pass `locationType=1` to retrieve parent station records instead. Supports `$top` and `$skip` for pagination.",
+        "description": "Returns a collection of stops and stations on the transit network. Defaults to `locationType=0` (individual stops/platforms). Pass `locationType=1` to retrieve parent station records instead. Supports `$top` and `$skip` for pagination.",
         "operationId": "get_all_stations_stations_get",
         "parameters": [
           {

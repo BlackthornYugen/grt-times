@@ -158,6 +158,13 @@ def _build_agencies() -> tuple[list[tuple["re.Pattern[str]", "AgencyState"]], "A
 
 _AGENCY_REGISTRY, _DEFAULT_AGENCY = _build_agencies()
 
+_SERVERS = [
+    {"url": "/", "description": "Local/Relative"},
+    {"url": os.environ.get("TRANSIT_GRT_SERVER_URL", "https://grt.jskw.ca"), "description": "Grand River Transit"},
+    {"url": os.environ.get("TRANSIT_TTC_SERVER_URL", "https://ttc.jskw.ca"), "description": "Toronto Transit Commission"},
+    {"url": os.environ.get("TRANSIT_OCT_SERVER_URL", "https://oct.jskw.ca"), "description": "OC Transpo"},
+]
+
 
 def get_agency(request: Request) -> AgencyState:
     host = request.headers.get("host", "").split(":")[0]
@@ -271,7 +278,7 @@ app = FastAPI(
         "name": "John Steel",
         "email": "john@steelcomputers.com",
     },
-    servers=[{"url": "/", "description": "Local/Relative Server"}],
+    servers=_SERVERS,
     openapi_tags=tags_metadata,
     lifespan=lifespan,
     docs_url="/",
