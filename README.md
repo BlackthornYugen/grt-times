@@ -109,6 +109,7 @@ helm upgrade --install grt-times ./chart -f values.override.yaml
 | `TRANSIT_TTC_HOST_REGEX` | `^ttc\.` | Regex matched against `Host` to route to TTC |
 | `TRANSIT_OCT_HOST_REGEX` | `^oct\.` | Regex matched against `Host` to route to OCTranspo |
 | `CACHE_TTL_SECONDS` | `2` | Live feed cache TTL in seconds |
+| `UVICORN_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Comma-separated IPs/CIDRs trusted for `X-Forwarded-For` (set to your HAProxy node/pod CIDR) |
 
 ## Linting & API Standards
 

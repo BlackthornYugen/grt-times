@@ -42,6 +42,10 @@ env: []
   #   value: "^ttc\\."
   # - name: TRANSIT_OCT_HOST_REGEX
   #   value: "^oct\\."
+  # Restrict which upstream IPs uvicorn trusts for X-Forwarded-For.
+  # Set to the HAProxy node/pod CIDR. Defaults to 127.0.0.1 (localhost only).
+  # - name: UVICORN_FORWARDED_ALLOW_IPS
+  #   value: "10.42.0.0/24"
 
 # Mount all keys from a pre-existing Secret as env vars.
 # Create the secret first:

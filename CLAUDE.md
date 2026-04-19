@@ -89,12 +89,16 @@ ssh ubuntu.jskw.dev "sudo kubectl create secret generic transit-api-secrets \
 
 # 2. Install the chart referencing the secret
 helm install grt-times ./chart \
-  --set 'envFrom[0].secretRef.name=transit-api-secrets'
+  --set 'envFrom[0].secretRef.name=transit-api-secrets' \
+  --set 'env[0].name=UVICORN_FORWARDED_ALLOW_IPS' \
+  --set 'env[0].value=10.42.0.0/16'
 ```
 
 To upgrade chart config without rebuilding the image:
 
 ```bash
 helm upgrade grt-times ./chart \
-  --set 'envFrom[0].secretRef.name=transit-api-secrets'
+  --set 'envFrom[0].secretRef.name=transit-api-secrets' \
+  --set 'env[0].name=UVICORN_FORWARDED_ALLOW_IPS' \
+  --set 'env[0].value=10.42.0.0/16'
 ```
