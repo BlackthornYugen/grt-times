@@ -140,7 +140,7 @@ def _build_agencies() -> tuple[list[tuple["re.Pattern[str]", "AgencyState"]], "A
         vehicle_feed_urls={"all": "https://nextrip-public-api.azure-api.net/octranspo/gtfs-rt-vp/beta/v1/VehiclePositions"},
         trip_feed_urls={"all": "https://nextrip-public-api.azure-api.net/octranspo/gtfs-rt-tp/beta/v1/TripUpdates"},
         alerts_url=None,
-        static_gtfs_url="http://www.octranspo1.com/files/google_transit.zip",
+        static_gtfs_url="https://oct-gtfs-emasagcnfmcgeham.z01.azurefd.net/public-access/GTFSExport.zip",
         auth_headers={"Ocp-Apim-Subscription-Key": oct_key} if oct_key else {},
         ssl_workaround=False,
         dynamic_route_map=False,
