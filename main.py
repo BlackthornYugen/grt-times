@@ -9,6 +9,11 @@ import os
 import zipfile
 import io
 import csv
+import ssl
+
+# GRT's upstream API uses a weak DH key that modern OpenSSL rejects by default.
+_ssl_context = ssl.create_default_context()
+_ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
 
 VEHICLES_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/vehiclepositions"
 ALERTS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/alerts"
@@ -26,7 +31,7 @@ _static_gtfs_last_modified = None
 
 async def fetch_route_map():
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_ssl_context) as client:
             for vtype in (1, 2):
                 response = await client.get(f"{VEHICLES_URL}/{vtype}", timeout=10.0)
                 if response.status_code == 200:
@@ -48,7 +53,7 @@ async def update_route_map_loop():
 async def fetch_static_gtfs():
     global _static_gtfs_etag, _static_gtfs_last_modified, _stops_data
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_ssl_context) as client:
             headers = {}
             if _static_gtfs_etag:
                 headers["If-None-Match"] = _static_gtfs_etag
@@ -161,7 +166,7 @@ async def get_vehicles_by_route(route_id: str):
 
     if not data:
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(verify=_ssl_context) as client:
                 response = await client.get(f"{VEHICLES_URL}/{vehicle_type}", timeout=10.0)
                 response.raise_for_status()
                 
@@ -206,7 +211,7 @@ async def get_alerts_data():
         return _alerts_cache["data"]
         
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=_ssl_context) as client:
             response = await client.get(ALERTS_URL, timeout=10.0)
             response.raise_for_status()
             
@@ -292,7 +297,7 @@ async def get_trips_by_route(route_id: str):
 
     if not data:
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(verify=_ssl_context) as client:
                 response = await client.get(f"{TRIPS_URL}/{vehicle_type}", timeout=10.0)
                 response.raise_for_status()
                 
