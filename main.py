@@ -11,9 +11,14 @@ import io
 import csv
 import ssl
 
-# GRT's upstream API uses a weak DH key that modern OpenSSL rejects by default.
+# GRT's upstream API uses a weak DH key that OpenSSL rejects at SECLEVEL=2 (default).
+# SECLEVEL=1 lowers the minimum DH key size to 512 bits. LibreSSL (macOS) doesn't
+# support @SECLEVEL but also doesn't enforce the same restrictions, so we ignore failures.
 _ssl_context = ssl.create_default_context()
-_ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
+try:
+    _ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
+except ssl.SSLError:
+    pass
 
 VEHICLES_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/vehiclepositions"
 ALERTS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/alerts"
@@ -316,13 +321,23 @@ async def get_trips_by_route(route_id: str):
     for entity in data.get("entity", []):
         trip_update = entity.get("tripUpdate", {})
         trip = trip_update.get("trip", {})
-        
+
         if str(trip.get("routeId")) == route_id:
+            stop_updates = []
+            for update in trip_update.get("stopTimeUpdate", []):
+                enriched = dict(update)
+                stop = _stops_data.get(update.get("stopId", ""))
+                if stop:
+                    enriched["stopName"] = stop.get("name")
+                    enriched["stopLatitude"] = stop.get("latitude")
+                    enriched["stopLongitude"] = stop.get("longitude")
+                stop_updates.append({k: v for k, v in enriched.items() if v is not None})
+
             cleaned_entity = {
                 "id": entity.get("id"),
                 "trip": trip,
                 "vehicle": trip_update.get("vehicle"),
-                "stopTimeUpdate": trip_update.get("stopTimeUpdate", []),
+                "stopTimeUpdate": stop_updates,
                 "timestamp": trip_update.get("timestamp")
             }
             cleaned_entity = {k: v for k, v in cleaned_entity.items() if v is not None}
