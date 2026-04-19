@@ -2,6 +2,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import ipaddress
+import logging
 import re
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -63,6 +65,28 @@ def _make_ssl_context(workaround: bool) -> ssl.SSLContext:
 
 
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "2"))
+
+_healthcheck_subnet_raw = os.environ.get("SUPPRESS_HEALTHCHECK_LOG_SUBNET", "")
+_healthcheck_network = ipaddress.ip_network(_healthcheck_subnet_raw, strict=False) if _healthcheck_subnet_raw else None
+
+class _SuppressHealthcheckLogs(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if _healthcheck_network is None:
+            return True
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 5:
+            # uvicorn access log args: (client_addr, method, path, http_version, status_code)
+            client_addr, method, path = args[0], args[1], args[2]
+            if method == "GET" and path == "/openapi.json":
+                host = client_addr.split(":")[0]
+                try:
+                    if ipaddress.ip_address(host) in _healthcheck_network:
+                        return False
+                except ValueError:
+                    pass
+        return True
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressHealthcheckLogs())
 
 
 @dataclass

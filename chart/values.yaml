@@ -45,7 +45,10 @@ env: []
   # Restrict which upstream IPs uvicorn trusts for X-Forwarded-For.
   # Set to the HAProxy node/pod CIDR. Defaults to 127.0.0.1 (localhost only).
   # - name: UVICORN_FORWARDED_ALLOW_IPS
-  #   value: "10.42.0.0/24"
+  #   value: "10.42.0.0/16"
+  # Suppress GET /openapi.json access log entries from this subnet (e.g. k8s healthchecks).
+  # - name: SUPPRESS_HEALTHCHECK_LOG_SUBNET
+  #   value: "10.42.0.0/16"
 
 # Mount all keys from a pre-existing Secret as env vars.
 # Create the secret first:
