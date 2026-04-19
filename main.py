@@ -1,6 +1,9 @@
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 import httpx
 from google.transit import gtfs_realtime_pb2
 from google.protobuf.json_format import MessageToDict
@@ -19,6 +22,23 @@ try:
     _ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
 except ssl.SSLError:
     pass
+
+def _gtfs_datetime_to_iso(start_date: str, start_time: str) -> Optional[str]:
+    """Combine GTFS startDate (YYYYMMDD) and startTime (HH:MM:SS) into ISO 8601.
+    startTime may exceed 24 hours for overnight trips (e.g. '25:30:00')."""
+    try:
+        base = datetime.strptime(start_date, "%Y%m%d")
+        h, m, s = (int(x) for x in start_time.split(":"))
+        return (base + timedelta(hours=h, minutes=m, seconds=s)).strftime("%Y-%m-%dT%H:%M:%S")
+    except (ValueError, AttributeError):
+        return None
+
+def _unix_to_iso(ts) -> Optional[str]:
+    """Convert a Unix epoch (int or string) to an ISO 8601 UTC datetime string."""
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError, OSError):
+        return None
 
 VEHICLES_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/vehiclepositions"
 ALERTS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/alerts"
@@ -153,6 +173,19 @@ app = FastAPI(
     docs_url="/"
 )
 
+_HTTP_STATUS_CODES = {
+    400: "badRequest", 404: "notFound", 429: "tooManyRequests",
+    500: "internalServerError", 502: "badGateway", 503: "serviceUnavailable",
+}
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    code = _HTTP_STATUS_CODES.get(exc.status_code, "error")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": code, "message": exc.detail}},
+    )
+
 @app.get(
     "/routes/{route_id}/vehicles",
     tags=["Vehicles"],
@@ -191,28 +224,29 @@ async def get_vehicles_by_route(route_id: str):
         except Exception as exception:
             raise HTTPException(status_code=500, detail=f"Internal server error: {str(exception)}")
 
-    # Clean and filter entities for the requested route
     cleaned_entities = []
     for entity in data.get("entity", []):
         vehicle = entity.get("vehicle", {})
-        trip = vehicle.get("trip", {})
-        
-        if str(trip.get("routeId")) == route_id:
+        raw_trip = vehicle.get("trip", {})
+
+        if str(raw_trip.get("routeId")) == route_id:
+            cleaned_trip = {k: v for k, v in raw_trip.items() if k not in ("routeId", "startDate", "startTime")}
+            iso_dt = _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", ""))
+            if iso_dt:
+                cleaned_trip["departureDateTime"] = iso_dt
+
+            ts = vehicle.get("timestamp")
             cleaned_entity = {
                 "id": entity.get("id"),
-                "trip": trip,
+                "trip": cleaned_trip or None,
                 "position": vehicle.get("position"),
                 "currentStopSequence": vehicle.get("currentStopSequence"),
                 "currentStatus": vehicle.get("currentStatus"),
-                "timestamp": vehicle.get("timestamp")
+                "timestamp": _unix_to_iso(ts) if ts else None,
             }
-            # Optional: Remove any keys that are None to keep it ultra clean
-            cleaned_entity = {k: v for k, v in cleaned_entity.items() if v is not None}
-            cleaned_entities.append(cleaned_entity)
+            cleaned_entities.append({k: v for k, v in cleaned_entity.items() if v is not None})
 
-    return {
-        "value": cleaned_entities
-    }
+    return {"value": cleaned_entities}
 
 async def get_alerts_data():
     current_time = time.time()
@@ -325,48 +359,97 @@ async def get_trips_by_route(route_id: str):
     cleaned_entities = []
     for entity in data.get("entity", []):
         trip_update = entity.get("tripUpdate", {})
-        trip = trip_update.get("trip", {})
+        raw_trip = trip_update.get("trip", {})
 
-        if str(trip.get("routeId")) == route_id:
+        if str(raw_trip.get("routeId")) == route_id:
+            # Build trip sub-object: remove routeId, combine startDate+startTime
+            cleaned_trip = {k: v for k, v in raw_trip.items() if k not in ("routeId", "startDate", "startTime")}
+            iso_dt = _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", ""))
+            if iso_dt:
+                cleaned_trip["departureDateTime"] = iso_dt
+
+            # Flatten vehicle object to vehicleId scalar
+            vehicle = trip_update.get("vehicle")
+            vehicle_id = vehicle.get("id") if vehicle else None
+
+            # Build enriched stop time updates
             stop_updates = []
             for update in trip_update.get("stopTimeUpdate", []):
-                enriched = dict(update)
-                stop = _stops_data.get(update.get("stopId", ""))
-                if stop:
-                    enriched["stopName"] = stop.get("name")
-                    enriched["stopLatitude"] = stop.get("latitude")
-                    enriched["stopLongitude"] = stop.get("longitude")
-                stop_updates.append({k: v for k, v in enriched.items() if v is not None})
+                stop_id = update.get("stopId")
+                stop_data = _stops_data.get(stop_id or "")
 
+                stop_obj = {"id": stop_id} if stop_id else {}
+                if stop_data:
+                    stop_obj.update({
+                        "name": stop_data.get("name"),
+                        "latitude": stop_data.get("latitude"),
+                        "longitude": stop_data.get("longitude"),
+                    })
+                    stop_obj = {k: v for k, v in stop_obj.items() if v is not None}
+
+                def convert_time_entry(entry):
+                    if entry and "time" in entry:
+                        iso = _unix_to_iso(entry["time"])
+                        return {**entry, "time": iso or entry["time"]}
+                    return entry
+
+                entry = {
+                    "stopSequence": update.get("stopSequence"),
+                    "stop": stop_obj or None,
+                    "arrival": convert_time_entry(update.get("arrival")),
+                    "departure": convert_time_entry(update.get("departure")),
+                    "scheduleRelationship": update.get("scheduleRelationship"),
+                }
+                stop_updates.append({k: v for k, v in entry.items() if v is not None})
+
+            ts = trip_update.get("timestamp")
             cleaned_entity = {
                 "id": entity.get("id"),
-                "trip": trip,
-                "vehicle": trip_update.get("vehicle"),
-                "stopTimeUpdate": stop_updates,
-                "timestamp": trip_update.get("timestamp")
+                "trip": cleaned_trip or None,
+                "vehicleId": vehicle_id,
+                "stopTimeUpdates": stop_updates,
+                "timestamp": _unix_to_iso(ts) if ts else None,
             }
-            cleaned_entity = {k: v for k, v in cleaned_entity.items() if v is not None}
-            cleaned_entities.append(cleaned_entity)
+            cleaned_entities.append({k: v for k, v in cleaned_entity.items() if v is not None})
 
     return {"value": cleaned_entities}
+
+def _clean_stop(stop: dict) -> dict:
+    return {k: v for k, v in stop.items() if v is not None and k != "code"}
 
 @app.get(
     "/stations",
     tags=["Stations"],
-    description="Returns a collection of all major stations AND bus stops on the GRT network."
+    description=(
+        "Returns a collection of stops and stations on the GRT network. "
+        "Defaults to `locationType=0` (individual stops/platforms). "
+        "Pass `locationType=1` to retrieve parent station records instead. "
+        "Supports `$top` and `$skip` for pagination."
+    ),
 )
-async def get_all_stations():
-    # Because 'Station' commonly colloquially refers to bus stops, we'll return all stops.
-    # We strip out nulls manually directly before transmission.
-    return {"value": [{k: v for k, v in stop.items() if v is not None} for stop in _stops_data.values()]}
+async def get_all_stations(
+    top: int = Query(default=100, ge=1, le=1000, alias="$top"),
+    skip: int = Query(default=0, ge=0, alias="$skip"),
+    location_type: Optional[int] = Query(default=None, alias="locationType"),
+):
+    filter_type = location_type if location_type is not None else 0
+    stops = [s for s in _stops_data.values() if s.get("locationType", 0) == filter_type]
+
+    total = len(stops)
+    page = stops[skip: skip + top]
+
+    result: dict = {"value": [_clean_stop(s) for s in page]}
+    if skip + top < total:
+        result["@odata.nextLink"] = f"/stations?$top={top}&$skip={skip + top}"
+    return result
 
 @app.get(
     "/stations/{station_id}",
     tags=["Stations"],
-    description="Look up a specific station or stop physically by its unique ID."
+    description="Look up a specific station or stop by its unique ID."
 )
 async def get_station_by_id(station_id: str):
     stop = _stops_data.get(station_id)
     if stop:
-        return {k: v for k, v in stop.items() if v is not None}
-    raise HTTPException(status_code=404, detail="Station or Stop not found.")
+        return _clean_stop(stop)
+    raise HTTPException(status_code=404, detail="Station or stop not found.")
