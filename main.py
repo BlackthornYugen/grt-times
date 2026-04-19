@@ -44,6 +44,13 @@ def _unix_to_iso(ts) -> Optional[str]:
     except (TypeError, ValueError, OSError):
         return None
 
+def _unix_to_eastern_iso(ts) -> Optional[str]:
+    """Convert a Unix epoch (int or string) to an ISO 8601 datetime string with Eastern offset."""
+    try:
+        return datetime.fromtimestamp(int(ts), tz=_EASTERN).isoformat(timespec="seconds")
+    except (TypeError, ValueError, OSError):
+        return None
+
 VEHICLES_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/vehiclepositions"
 ALERTS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/alerts"
 TRIPS_URL = "https://webapps.regionofwaterloo.ca/api/grt-routes/api/tripupdates"
@@ -380,17 +387,15 @@ async def get_trips_by_route(route_id: str):
                     })
                     stop_obj = {k: v for k, v in stop_obj.items() if v is not None}
 
-                def convert_time_entry(entry):
-                    if entry and "time" in entry:
-                        iso = _unix_to_iso(entry["time"])
-                        return {**entry, "time": iso or entry["time"]}
-                    return entry
+                def _get_time(event):
+                    t = (event or {}).get("time")
+                    return _unix_to_eastern_iso(t) if t else None
 
                 entry = {
                     "stopSequence": update.get("stopSequence"),
                     "stop": stop_obj or None,
-                    "arrival": convert_time_entry(update.get("arrival")),
-                    "departure": convert_time_entry(update.get("departure")),
+                    "arrivalTime": _get_time(update.get("arrival")),
+                    "departureTime": _get_time(update.get("departure")),
                     "scheduleRelationship": update.get("scheduleRelationship"),
                 }
                 stop_updates.append({k: v for k, v in entry.items() if v is not None})

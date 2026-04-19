@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
-from main import app, _gtfs_datetime_to_iso, _unix_to_iso
+from main import app, _gtfs_datetime_to_iso, _unix_to_iso, _unix_to_eastern_iso
 import httpx
 from google.transit import gtfs_realtime_pb2
 
@@ -97,6 +97,18 @@ def test_unix_to_iso():
 def test_unix_to_iso_invalid():
     assert _unix_to_iso(None) is None
     assert _unix_to_iso("not_a_number") is None
+
+def test_unix_to_eastern_iso():
+    # Unix epoch 0 = 1970-01-01 00:00:00 UTC = 1969-12-31 19:00:00 EST
+    assert _unix_to_eastern_iso(0) == "1969-12-31T19:00:00-05:00"
+
+def test_unix_to_eastern_iso_summer():
+    # 1776570177 UTC = 2026-04-18 23:42:57 EDT (-04:00)
+    assert _unix_to_eastern_iso(1776570177) == "2026-04-18T23:42:57-04:00"
+
+def test_unix_to_eastern_iso_invalid():
+    assert _unix_to_eastern_iso(None) is None
+    assert _unix_to_eastern_iso("bad") is None
 
 
 # ---------------------------------------------------------------------------
@@ -227,10 +239,12 @@ def test_trips_stop_unknown_id_still_returns_id(mock_get):
 
 @patch("main.httpx.AsyncClient.get")
 @patch.dict("main._route_type_map", {"201": 1})
-def test_trips_arrival_time_is_iso8601(mock_get):
+def test_trips_arrival_departure_are_flat_eastern(mock_get):
     mock_get.return_value = _mock_response(_make_trips_feed(arrival_time=0))
     update = TestClient(app).get("/routes/201/trips").json()["value"][0]["stopTimeUpdates"][0]
-    assert update["arrival"]["time"] == "1970-01-01T00:00:00Z"
+    assert "arrival" not in update
+    assert "departure" not in update
+    assert update["arrivalTime"] == "1969-12-31T19:00:00-05:00"
 
 
 # ---------------------------------------------------------------------------
