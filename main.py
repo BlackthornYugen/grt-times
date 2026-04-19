@@ -69,24 +69,8 @@ CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "2"))
 _healthcheck_subnet_raw = os.environ.get("SUPPRESS_HEALTHCHECK_LOG_SUBNET", "")
 _healthcheck_network = ipaddress.ip_network(_healthcheck_subnet_raw, strict=False) if _healthcheck_subnet_raw else None
 
-class _SuppressHealthcheckLogs(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        if _healthcheck_network is None:
-            return True
-        args = record.args
-        if isinstance(args, tuple) and len(args) >= 5:
-            # uvicorn access log args: (client_addr, method, path, http_version, status_code)
-            client_addr, method, path = args[0], args[1], args[2]
-            if method == "GET" and path == "/openapi.json":
-                host = client_addr.split(":")[0]
-                try:
-                    if ipaddress.ip_address(host) in _healthcheck_network:
-                        return False
-                except ValueError:
-                    pass
-        return True
-
-logging.getLogger("uvicorn.access").addFilter(_SuppressHealthcheckLogs())
+# Disable uvicorn's built-in access log; the app middleware handles it with host context.
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 
 @dataclass
@@ -309,15 +293,32 @@ app = FastAPI(
     docs_url="/",
 )
 
-# Reflect the request Origin back so Swagger UI on any agency domain can call
-# any other agency domain. allow_origin_regex causes Starlette to echo the
-# actual Origin header rather than responding with *.
 app.add_middleware(
     CORSMiddleware,
+    # Reflect the request Origin back so Swagger UI on any agency domain can call
+    # any other agency domain. allow_origin_regex causes Starlette to echo the
+    # actual Origin header rather than responding with *.
     allow_origin_regex=r".*",
     allow_methods=["GET"],
     allow_headers=["Accept"],
 )
+
+_access_log = logging.getLogger("uvicorn")
+
+@app.middleware("http")
+async def _log_access(request: Request, call_next):
+    response = await call_next(request)
+    client = request.client.host if request.client else "-"
+    method, path = request.method, request.url.path
+    if _healthcheck_network and method == "GET" and path == "/openapi.json":
+        try:
+            if ipaddress.ip_address(client) in _healthcheck_network:
+                return response
+        except ValueError:
+            pass
+    host = (request.headers.get("host") or "")[:30]
+    _access_log.info('%s - %s - "%s %s" %d', host, client, method, path, response.status_code)
+    return response
 
 _HTTP_STATUS_CODES = {
     400: "badRequest", 404: "notFound", 429: "tooManyRequests",
