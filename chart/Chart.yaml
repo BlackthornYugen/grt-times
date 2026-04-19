@@ -1,0 +1,12 @@
+apiVersion: v2
+name: grt-times
+description: A Helm chart for the GRT Vehicle Positions API
+type: application
+version: 0.1.0
+appVersion: "latest"
+maintainers:
+  - name: John Steel
+keywords:
+  - grt
+  - gtfs
+  - transit

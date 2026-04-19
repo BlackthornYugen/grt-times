@@ -1,0 +1,61 @@
+replicaCount: 1
+
+image:
+  repository: grt-times
+  pullPolicy: Never
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: grt-times.example.com
+  path: /
+  pathType: Prefix
+  tls: []
+
+env: []
+  # - name: CACHE_TTL_SECONDS
+  #   value: "2"
+
+resources: {}
+
+livenessProbe:
+  httpGet:
+    path: /openapi.json
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /openapi.json
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 5
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
