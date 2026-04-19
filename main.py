@@ -497,6 +497,76 @@ async def get_trips_by_route(route_id: str, state: AgencyState = Depends(get_age
     return {"value": cleaned_entities}
 
 
+@app.get(
+    "/stations/{station_id}/arrivals",
+    tags=["Trips"],
+    description=(
+        "Returns upcoming arrivals at a specific stop across all active trips, sorted by arrival time. "
+        "Excludes arrivals more than 60 seconds in the past and any stops marked as skipped."
+    ),
+)
+async def get_arrivals_at_station(
+    station_id: str,
+    top: int = Query(default=10, ge=1, le=100, alias="$top"),
+    state: AgencyState = Depends(get_agency),
+):
+    current_time = time.time()
+    arrivals: list[tuple[int, dict]] = []
+
+    for feed_key, url in state.config.trip_feed_urls.items():
+        data = None
+        if feed_key in state.trips_cache:
+            cached_data, timestamp = state.trips_cache[feed_key]
+            if current_time - timestamp < CACHE_TTL_SECONDS:
+                data = cached_data
+
+        if not data:
+            try:
+                async with httpx.AsyncClient(verify=state.ssl_context) as client:
+                    response = await client.get(url, headers=state.config.auth_headers, timeout=10.0)
+                    response.raise_for_status()
+                    feed = gtfs_realtime_pb2.FeedMessage()
+                    feed.ParseFromString(response.content)
+                    data = MessageToDict(feed)
+                    state.trips_cache[feed_key] = (data, current_time)
+            except httpx.HTTPError as e:
+                raise HTTPException(status_code=502, detail=f"Error communicating with {state.config.name} API: {e}")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+        for entity in data.get("entity", []):
+            trip_update = entity.get("tripUpdate", {})
+            raw_trip = trip_update.get("trip", {})
+
+            for update in trip_update.get("stopTimeUpdate", []):
+                if update.get("stopId") != station_id:
+                    continue
+                if update.get("scheduleRelationship") == "SKIPPED":
+                    continue
+
+                arrival_ts = (update.get("arrival") or {}).get("time")
+                departure_ts = (update.get("departure") or {}).get("time")
+                sort_ts = int(arrival_ts or departure_ts or 0)
+
+                if sort_ts < current_time - 60:
+                    continue
+
+                vehicle = trip_update.get("vehicle")
+                entry = {
+                    "routeId": raw_trip.get("routeId"),
+                    "tripId": entity.get("id"),
+                    "tripStartDateTime": _gtfs_datetime_to_iso(raw_trip.get("startDate", ""), raw_trip.get("startTime", "")),
+                    "vehicleId": vehicle.get("id") if vehicle else None,
+                    "arrivalTime": _unix_to_eastern_iso(arrival_ts) if arrival_ts else None,
+                    "departureTime": _unix_to_eastern_iso(departure_ts) if departure_ts else None,
+                    "scheduleRelationship": update.get("scheduleRelationship"),
+                }
+                arrivals.append((sort_ts, {k: v for k, v in entry.items() if v is not None}))
+
+    arrivals.sort(key=lambda x: x[0])
+    return {"value": [entry for _, entry in arrivals[:top]]}
+
+
 def _clean_stop(stop: dict) -> dict:
     return {k: v for k, v in stop.items() if v is not None and k != "code"}
 

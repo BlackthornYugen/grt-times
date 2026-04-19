@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
 from main import app, _DEFAULT_AGENCY, _gtfs_datetime_to_iso, _unix_to_iso, _unix_to_eastern_iso
 import httpx
+import time
 from google.transit import gtfs_realtime_pb2
 
 # ---------------------------------------------------------------------------
@@ -244,6 +245,61 @@ def test_trips_arrival_departure_are_flat_eastern(mock_get):
     assert "arrival" not in update
     assert "departure" not in update
     assert update["arrivalTime"] == "1969-12-31T19:00:00-05:00"
+
+
+# ---------------------------------------------------------------------------
+# Arrivals at station
+# ---------------------------------------------------------------------------
+
+@patch("main.httpx.AsyncClient.get")
+def test_arrivals_basic_shape(mock_get):
+    future_ts = int(time.time()) + 300
+    empty = gtfs_realtime_pb2.FeedMessage()
+    empty.header.gtfs_realtime_version = "2.0"
+    # GRT has two feeds (bus, rail); return real data for first, empty for second
+    mock_get.side_effect = [
+        _mock_response(_make_trips_feed(stop_id="6003", arrival_time=future_ts, route_id="301")),
+        _mock_response(empty),
+    ]
+    data = TestClient(app).get("/stations/6003/arrivals?$top=5").json()
+    assert "value" in data
+    assert len(data["value"]) == 1
+    assert data["value"][0]["routeId"] == "301"
+    assert "arrivalTime" in data["value"][0]
+    assert "tripId" in data["value"][0]
+
+@patch("main.httpx.AsyncClient.get")
+def test_arrivals_excludes_past(mock_get):
+    past_ts = int(time.time()) - 120
+    empty = gtfs_realtime_pb2.FeedMessage()
+    empty.header.gtfs_realtime_version = "2.0"
+    mock_get.side_effect = [
+        _mock_response(_make_trips_feed(stop_id="6003", arrival_time=past_ts)),
+        _mock_response(empty),
+    ]
+    data = TestClient(app).get("/stations/6003/arrivals").json()
+    assert data["value"] == []
+
+@patch("main.httpx.AsyncClient.get")
+def test_arrivals_sorted_by_time(mock_get):
+    now = int(time.time())
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    for offset, eid in [(600, "b"), (120, "a")]:
+        e = feed.entity.add()
+        e.id = eid
+        e.trip_update.trip.route_id = "301"
+        e.trip_update.trip.start_date = "20260419"
+        e.trip_update.trip.start_time = "10:00:00"
+        stu = e.trip_update.stop_time_update.add()
+        stu.stop_id = "6003"
+        stu.arrival.time = now + offset
+    empty = gtfs_realtime_pb2.FeedMessage()
+    empty.header.gtfs_realtime_version = "2.0"
+    mock_get.side_effect = [_mock_response(feed), _mock_response(empty)]
+    data = TestClient(app).get("/stations/6003/arrivals").json()
+    assert data["value"][0]["tripId"] == "a"
+    assert data["value"][1]["tripId"] == "b"
 
 
 # ---------------------------------------------------------------------------
