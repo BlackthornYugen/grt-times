@@ -133,12 +133,17 @@ tags_metadata = [
 ]
 
 app = FastAPI(
-    title="GRT Vehicle Positions API",
-    description="A proxy service that ingest GTFS-Realtime Protocol Buffer feeds from Grand River Transit (GRT) and exposes them as RESTful JSON endpoints.",
+    title="GRT Transit API",
+    description=(
+        "A proxy service that ingests GTFS-Realtime Protocol Buffer feeds from Grand River Transit (GRT) "
+        "and exposes them as RESTful JSON endpoints.\n\n"
+        "This API is designed in accordance with the "
+        "[Microsoft Graph REST API Guidelines](https://github.com/microsoft/api-guidelines/blob/vNext/graph/GuidelinesGraph.md)."
+    ),
     version="1.0.0",
     contact={
-        "name": "API Support",
-        "email": "support@example.com"
+        "name": "John Steel",
+        "email": "john@steelcomputers.com"
     },
     servers=[
         {"url": "/", "description": "Local/Relative Server"}
