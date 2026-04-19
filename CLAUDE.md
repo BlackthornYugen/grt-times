@@ -106,3 +106,9 @@ helm upgrade grt-times ./chart \
   --set 'env[1].name=SUPPRESS_HEALTHCHECK_LOG_SUBNET' \
   --set 'env[1].value=10.42.0.0/16'
 ```
+
+When deploying a new image and a chart upgrade together, always complete step 3 (image import) before running `helm upgrade`. The upgrade triggers a rolling restart immediately — if the new image isn't in containerd yet, the pod will start on the old image. In that case, follow up with:
+
+```bash
+kubectl rollout restart deployment/grt-times && kubectl rollout status deployment/grt-times
+```
