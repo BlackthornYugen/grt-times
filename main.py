@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import re
 from typing import Optional
 from zoneinfo import ZoneInfo
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -97,7 +98,7 @@ class AgencyState:
         return next(iter(self.config.vehicle_feed_urls))
 
 
-def _build_agencies() -> tuple[dict[str, "AgencyState"], "AgencyState"]:
+def _build_agencies() -> tuple[list[tuple["re.Pattern[str]", "AgencyState"]], "AgencyState"]:
     _GRT_BASE = "https://webapps.regionofwaterloo.ca/api/grt-routes/api"
     grt = AgencyState(AgencyConfig(
         name="GRT",
@@ -116,7 +117,7 @@ def _build_agencies() -> tuple[dict[str, "AgencyState"], "AgencyState"]:
         dynamic_route_map=True,
     ))
 
-    ttc_key = os.environ.get("ttc", "")
+    ttc_key = os.environ.get("TRANSIT_TTC_API_KEY", "")
     ttc = AgencyState(AgencyConfig(
         name="TTC",
         vehicle_feed_urls={"all": "https://bustime.ttc.ca/gtfsrt/vehicles"},
@@ -133,7 +134,7 @@ def _build_agencies() -> tuple[dict[str, "AgencyState"], "AgencyState"]:
         dynamic_route_map=False,
     ))
 
-    oct_key = os.environ.get("octranspo", "")
+    oct_key = os.environ.get("TRANSIT_OCT_API_KEY", "")
     oct = AgencyState(AgencyConfig(
         name="OCTranspo",
         vehicle_feed_urls={"all": "https://nextrip-public-api.azure-api.net/octranspo/gtfs-rt-vp/beta/v1/VehiclePositions"},
@@ -145,11 +146,13 @@ def _build_agencies() -> tuple[dict[str, "AgencyState"], "AgencyState"]:
         dynamic_route_map=False,
     ))
 
-    registry = {
-        os.environ.get("GRT_HOST", "grt.jskw.ca"): grt,
-        os.environ.get("TTC_HOST", "ttc.jskw.ca"): ttc,
-        os.environ.get("OCT_HOST", "oct.jskw.ca"): oct,
-    }
+    # Each entry is (compiled regex, agency state). First match wins.
+    # Defaults match any host whose first label is the agency code (grt/ttc/oct).
+    registry = [
+        (re.compile(os.environ.get("TRANSIT_GRT_HOST_REGEX", r"^grt\.")), grt),
+        (re.compile(os.environ.get("TRANSIT_TTC_HOST_REGEX", r"^ttc\.")), ttc),
+        (re.compile(os.environ.get("TRANSIT_OCT_HOST_REGEX", r"^oct\.")), oct),
+    ]
     return registry, grt
 
 
@@ -158,7 +161,10 @@ _AGENCY_REGISTRY, _DEFAULT_AGENCY = _build_agencies()
 
 def get_agency(request: Request) -> AgencyState:
     host = request.headers.get("host", "").split(":")[0]
-    return _AGENCY_REGISTRY.get(host, _DEFAULT_AGENCY)
+    for pattern, state in _AGENCY_REGISTRY:
+        if pattern.search(host):
+            return state
+    return _DEFAULT_AGENCY
 
 
 async def fetch_route_map(state: AgencyState):
