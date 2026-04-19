@@ -16,26 +16,6 @@
     }
   ],
   "paths": {
-    "/": {
-      "get": {
-        "tags": [
-          "Root"
-        ],
-        "summary": "Get Root",
-        "description": "Root endpoint welcoming users and providing a basic hint on how to use the API.",
-        "operationId": "get_root__get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/routes/{route_id}/vehicles": {
       "get": {
         "tags": [
@@ -137,6 +117,108 @@
           }
         }
       }
+    },
+    "/routes/{route_id}/trips": {
+      "get": {
+        "tags": [
+          "Trips"
+        ],
+        "summary": "Get Trips By Route",
+        "description": "Returns an array of ETA updates and stop schedules for all presently active vehicle trips on the requested route ID.",
+        "operationId": "get_trips_by_route_routes__route_id__trips_get",
+        "parameters": [
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Route Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stations": {
+      "get": {
+        "tags": [
+          "Stations"
+        ],
+        "summary": "Get All Stations",
+        "description": "Returns a collection of all major stations AND bus stops on the GRT network.",
+        "operationId": "get_all_stations_stations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stations/{station_id}": {
+      "get": {
+        "tags": [
+          "Stations"
+        ],
+        "summary": "Get Station By Id",
+        "description": "Look up a specific station or stop physically by its unique ID.",
+        "operationId": "get_station_by_id_stations__station_id__get",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Station Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -198,16 +280,20 @@
   },
   "tags": [
     {
-      "name": "Root",
-      "description": "Core routing and entry points."
-    },
-    {
       "name": "Vehicles",
       "description": "Endpoints regarding real-time vehicle positioning."
     },
     {
       "name": "Alerts",
       "description": "Endpoints regarding active GTFS-RT service alerts."
+    },
+    {
+      "name": "Trips",
+      "description": "Endpoints for forecasting vehicle arrivals at stops and schedule deviations."
+    },
+    {
+      "name": "Stations",
+      "description": "Endpoints for static definitions of transit hubs, platforms, and specific stops."
     }
   ]
 }
