@@ -3,3 +3,4 @@ GuidelinesGraph.md
 .env
 static/swagger-ui/
 *.log
+*.pyc

@@ -4,13 +4,15 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import ipaddress
 import logging
+from pathlib import Path
 import re
 from typing import Optional
+from urllib.parse import quote, unquote
 from zoneinfo import ZoneInfo
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import httpx
@@ -58,7 +60,12 @@ def _make_ssl_context(workaround: bool) -> ssl.SSLContext:
     # GRT's upstream uses a weak DH key rejected by OpenSSL at SECLEVEL=2.
     # SECLEVEL=1 lowers the minimum DH key size to 512 bits.
     # LibreSSL (macOS) ignores @SECLEVEL and doesn't enforce the same restrictions.
-    ctx = ssl.create_default_context()
+    #
+    # SSL_CERT_FILE can point to a PEM bundle that is loaded in addition to the
+    # system trust store — useful for trusting a local proxy CA (e.g. mitmproxy)
+    # without modifying the system keychain.
+    cafile = os.environ.get("SSL_CERT_FILE") or None
+    ctx = ssl.create_default_context(cafile=cafile)
     if workaround:
         try:
             ctx.set_ciphers("DEFAULT@SECLEVEL=1")
@@ -68,6 +75,7 @@ def _make_ssl_context(workaround: bool) -> ssl.SSLContext:
 
 
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "2"))
+_GTFS_CACHE_DIR: Optional[str] = os.environ.get("GTFS_CACHE_DIR", "")
 
 _healthcheck_subnet_raw = os.environ.get("SUPPRESS_HEALTHCHECK_LOG_SUBNET", "")
 _healthcheck_network = ipaddress.ip_network(_healthcheck_subnet_raw, strict=False) if _healthcheck_subnet_raw else None
@@ -210,7 +218,106 @@ async def update_route_map_loop(state: AgencyState):
         await fetch_route_map(state)
 
 
+def _parse_stops_from_zip(zip_bytes: bytes) -> dict:
+    """Parse stops.txt from a GTFS zip and return a dict keyed by stop_id."""
+    stops = {}
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        with z.open("stops.txt") as f:
+            reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
+            for row in reader:
+                stop_id = row.get("stop_id")
+                stops[stop_id] = {
+                    "id": stop_id,
+                    "name": row.get("stop_name"),
+                    "code": row.get("stop_code"),
+                    "latitude": float(row.get("stop_lat")) if row.get("stop_lat") else None,
+                    "longitude": float(row.get("stop_lon")) if row.get("stop_lon") else None,
+                    "locationType": int(row.get("location_type")) if row.get("location_type") else 0,
+                    "parentStation": row.get("parent_station"),
+                }
+    return stops
+
+
+def _gtfs_cache_dir(agency_name: str) -> Optional[Path]:
+    """Return the cache directory Path, or None when GTFS_CACHE_DIR is not set."""
+    if not _GTFS_CACHE_DIR:
+        return None
+    return Path(_GTFS_CACHE_DIR)
+
+
+def _gtfs_zip_filename(agency_name: str, epoch: int, etag: Optional[str], last_modified: Optional[str]) -> str:
+    """Build a zip filename that encodes the HTTP cache headers reversibly.
+
+    Format: ``<agency>_<epoch>_e<percent-encoded-etag>.zip``
+    or ``<agency>_<epoch>_lm<percent-encoded-last-modified>.zip`` when no ETag.
+
+    Percent-encoding preserves the exact header value so it can be decoded on
+    startup and used directly in ``If-None-Match`` / ``If-Modified-Since``.
+    """
+    agency_slug = agency_name.lower().replace(" ", "_")
+    if etag:
+        header_part = "e" + quote(etag, safe="")
+    elif last_modified:
+        header_part = "lm" + quote(last_modified, safe="")
+    else:
+        header_part = "default"
+    return f"{agency_slug}_{epoch}_{header_part}.zip"
+
+
+def _headers_from_zip_path(p: Path) -> tuple[Optional[str], Optional[str]]:
+    """Extract (etag, last_modified) from a zip filename produced by `_gtfs_zip_filename`.
+
+    Returns ``(None, None)`` when the filename does not match the expected format.
+    """
+    # Strip agency_slug and epoch prefix, leaving the header_part.
+    parts = p.stem.split("_", 2)
+    if len(parts) < 3:
+        return None, None
+    header_part = parts[2]
+    if header_part.startswith("e"):
+        return unquote(header_part[1:]), None
+    if header_part.startswith("lm"):
+        return None, unquote(header_part[2:])
+    return None, None
+
+
+def _find_latest_cached_zip(cache_dir: Path, agency_name: str) -> Optional[Path]:
+    """Return the most recently fetched zip for an agency, by epoch in the filename.
+
+    Expected filename format: <agency_slug>_<epoch>_<header_part>.zip
+    """
+    agency_slug = agency_name.lower().replace(" ", "_")
+    epoch_pattern = re.compile(rf"^{re.escape(agency_slug)}_(\d+)_")
+    candidates = list(cache_dir.glob(f"{agency_slug}_*.zip"))
+    if not candidates:
+        return None
+
+    def epoch_from_path(p: Path) -> int:
+        m = epoch_pattern.match(p.name)
+        return int(m.group(1)) if m else 0
+
+    return max(candidates, key=epoch_from_path)
+
+
 async def fetch_static_gtfs(state: AgencyState):
+    cache_dir = _gtfs_cache_dir(state.config.name)
+
+    # On first call, restore HTTP cache headers and stops from the latest cached
+    # zip so the subsequent network request can be conditional (304 No Content).
+    if not state.stops_data and cache_dir and cache_dir.exists():
+        cached_zip = _find_latest_cached_zip(cache_dir, state.config.name)
+        if cached_zip:
+            etag, last_modified = _headers_from_zip_path(cached_zip)
+            state.static_gtfs_etag = etag
+            state.static_gtfs_last_modified = last_modified
+            try:
+                new_stops = _parse_stops_from_zip(cached_zip.read_bytes())
+                if new_stops:
+                    state.stops_data.update(new_stops)
+                    print(f"[{state.config.name}] Loaded {len(state.stops_data)} stops from disk cache ({cached_zip.name}).")
+            except Exception as e:
+                print(f"[{state.config.name}] Could not load GTFS from disk cache: {e}")
+
     try:
         async with httpx.AsyncClient(verify=state.ssl_context) as client:
             headers = {}
@@ -228,25 +335,26 @@ async def fetch_static_gtfs(state: AgencyState):
                 state.static_gtfs_etag = response.headers.get("ETag")
                 state.static_gtfs_last_modified = response.headers.get("Last-Modified")
 
-                with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-                    with z.open("stops.txt") as f:
-                        reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
-                        new_stops = {}
-                        for row in reader:
-                            stop_id = row.get("stop_id")
-                            new_stops[stop_id] = {
-                                "id": stop_id,
-                                "name": row.get("stop_name"),
-                                "code": row.get("stop_code"),
-                                "latitude": float(row.get("stop_lat")) if row.get("stop_lat") else None,
-                                "longitude": float(row.get("stop_lon")) if row.get("stop_lon") else None,
-                                "locationType": int(row.get("location_type")) if row.get("location_type") else 0,
-                                "parentStation": row.get("parent_station"),
-                            }
-                        if new_stops:
-                            state.stops_data.clear()
-                            state.stops_data.update(new_stops)
-                            print(f"[{state.config.name}] Loaded {len(state.stops_data)} stops from GTFS bundle.")
+                new_stops = _parse_stops_from_zip(response.content)
+                if new_stops:
+                    state.stops_data.clear()
+                    state.stops_data.update(new_stops)
+                    print(f"[{state.config.name}] Loaded {len(state.stops_data)} stops from GTFS bundle.")
+
+                if cache_dir:
+                    try:
+                        cache_dir.mkdir(parents=True, exist_ok=True)
+                        epoch = int(time.time())
+                        filename = _gtfs_zip_filename(
+                            state.config.name, epoch,
+                            state.static_gtfs_etag, state.static_gtfs_last_modified,
+                        )
+                        zip_path = cache_dir / filename
+                        tmp_zip = zip_path.with_suffix(f".tmp{os.getpid()}")
+                        tmp_zip.write_bytes(response.content)
+                        tmp_zip.replace(zip_path)
+                    except Exception as e:
+                        print(f"[{state.config.name}] Could not write GTFS cache: {e}")
     except Exception as e:
         print(f"[{state.config.name}] Error updating static GTFS data: {e}")
 

@@ -109,6 +109,8 @@ helm upgrade --install grt-times ./chart -f values.override.yaml
 | `TRANSIT_TTC_HOST_REGEX` | `^ttc\.` | Regex matched against `Host` to route to TTC |
 | `TRANSIT_OCT_HOST_REGEX` | `^oct\.` | Regex matched against `Host` to route to OCTranspo |
 | `CACHE_TTL_SECONDS` | `2` | Live feed cache TTL in seconds |
+| `GTFS_CACHE_DIR` | — | Directory to persist downloaded GTFS zip bundles between restarts. When set, each agency's zip is written to `<dir>/<agency>.zip` alongside a `<agency>.json` sidecar storing the ETag/Last-Modified headers. On startup the cached bundle is loaded immediately, and a conditional HTTP request is made to check for updates. |
+| `SSL_CERT_FILE` | — | Path to a PEM CA bundle to trust for outbound HTTPS requests (e.g. `~/.mitmproxy/mitmproxy-ca-cert.pem` when inspecting traffic through a local proxy). Loaded in addition to the system trust store. |
 | `UVICORN_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Comma-separated IPs/CIDRs trusted for `X-Forwarded-For` (set to your HAProxy node/pod CIDR) |
 | `SUPPRESS_HEALTHCHECK_LOG_SUBNET` | — | CIDR whose `GET /openapi.json` requests are dropped from access logs (e.g. k8s healthcheck subnet) |
 
