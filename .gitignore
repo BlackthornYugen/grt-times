@@ -1,3 +1,4 @@
 *.tar
 GuidelinesGraph.md
 .env
+static/swagger-ui/

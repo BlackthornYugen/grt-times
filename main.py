@@ -9,7 +9,9 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 import httpx
 from google.transit import gtfs_realtime_pb2
 from google.protobuf.json_format import MessageToDict
@@ -290,8 +292,59 @@ app = FastAPI(
     servers=_SERVERS,
     openapi_tags=tags_metadata,
     lifespan=lifespan,
-    docs_url="/",
+    docs_url=None,
 )
+
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+LANDING_PAGE_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transit API</title>
+    <link rel="stylesheet" href="/static/landing.css">
+</head>
+<body>
+    <div class="container">
+        <span class="badge">v1.0.0</span>
+        <h1>Transit API</h1>
+        <p>A high-performance proxy service for real-time transit data, providing unified access to GTFS feeds with low-latency caching and standard RESTful responses.</p>
+        
+        <div class="links">
+            <a href="/swagger-ui" class="btn btn-primary">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M16,11V18.1L13.9,16L11.1,18.8L8.3,16L6.1,18.2V11H16Z" /></svg>
+                API Explore
+            </a>
+            <a href="https://github.com/BlackthornYugen/grt-times" class="btn btn-outline" target="_blank">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M12,2A10,10 0 0,0 2,12C2,16.42 4.87,20.17 8.84,21.5C9.34,21.58 9.5,21.27 9.5,21C9.5,20.77 9.5,20.14 9.5,19.31C6.73,19.91 6.14,17.97 6.14,17.97C5.68,16.81 5.03,16.5 5.03,16.5C4.12,15.88 5.1,15.9 5.1,15.9C6.1,15.97 6.63,16.93 6.63,16.93C7.5,18.45 8.97,18 9.54,17.76C9.63,17.11 9.89,16.67 10.17,16.42C7.95,16.17 5.62,15.31 5.62,11.5C5.62,10.39 6,9.5 6.65,8.79C6.55,8.54 6.2,7.5 6.75,6.15C6.75,6.15 7.59,5.88 9.5,7.17C10.29,6.95 11.15,6.84 12,6.84C12.85,6.84 13.71,6.95 14.5,7.17C16.41,5.88 17.25,6.15 17.25,6.15C17.8,7.5 17.45,8.54 17.35,8.79C18,9.5 18.38,10.39 18.38,11.5C18.38,15.32 16.04,16.16 13.81,16.41C14.17,16.72 14.5,17.33 14.5,18.26C14.5,19.6 14.5,20.68 14.5,21C14.5,21.27 14.66,21.59 15.17,21.5C19.14,20.16 22,16.42 22,12A10,10 0 0,0 12,2Z" /></svg>
+                GitHub
+            </a>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+@app.get("/", include_in_schema=False)
+async def landing_page():
+    return HTMLResponse(content=LANDING_PAGE_HTML)
+
+
+@app.get("/swagger-ui", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - Swagger UI",
+        oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+        swagger_js_url="/static/swagger-ui/swagger-ui-bundle.js",
+        swagger_css_url="/static/swagger-ui/swagger-ui.css",
+        swagger_favicon_url="/static/swagger-ui/favicon-32x32.png",
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -304,6 +357,23 @@ app.add_middleware(
 )
 
 _access_log = logging.getLogger("uvicorn")
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    response.headers["Content-Security-Policy"] = csp
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
 
 @app.middleware("http")
 async def _log_access(request: Request, call_next):

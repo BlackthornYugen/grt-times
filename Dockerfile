@@ -14,6 +14,8 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+RUN uv run scripts/get_assets.py
+
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
