@@ -78,7 +78,7 @@ Images are tagged with the app version from `pyproject.toml`. Passing a new tag 
 
 ```bash
 # Read version from pyproject.toml
-VERSION=$(grep '^version' pyproject.toml | awk -F'"' '{print $2}')
+VERSION=$(grep '^version' pyproject.toml | awk -F'"' '{print $2}' | tee /dev/stderr)
 
 # 1. Build for amd64 (k3s node architecture)
 docker buildx build --platform linux/amd64 -t grt-times:$VERSION .
@@ -134,3 +134,10 @@ helm upgrade grt-times ./chart \
   --set 'env[1].name=SUPPRESS_HEALTHCHECK_LOG_SUBNET' \
   --set 'env[1].value=10.42.0.0/16'
 ```
+
+## Operational Safety
+
+- **No Unauthorized Deletions**: Never delete files on the local machine or remote servers (especially logs, tarballs, or backups) without explicit user approval.
+- **No Unauthorized Restarts**: Never restart system services (e.g., `k3s`, `containerd`, `docker`) without explicit user approval.
+- **Kubeconfig**: Always use the local `helm` and `kubectl` with the appropriate `KUBECONFIG` (e.g., `~/.kube/ubuntu.yaml` for the production cluster). Do not run cluster commands via SSH.
+- **Resource Pressure**: If deployment fails due to disk pressure or other resource constraints, report the specific error and available capacity to the user rather than attempting to self-remediate by clearing space.
