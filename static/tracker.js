@@ -72,10 +72,14 @@ searchResults.addEventListener('click', (e) => {
     searchResults.classList.add('hidden');
 });
 
-function selectStation(id, name) {
+function selectStation(id, name, updateHash = true) {
     currentStationId = id;
     stationNameHeader.textContent = name;
     arrivalsSection.classList.remove('hidden');
+
+    if (updateHash) {
+        window.location.hash = id;
+    }
     
     // Clear previous polling
     if (pollInterval) clearInterval(pollInterval);
@@ -150,5 +154,23 @@ document.addEventListener('click', (e) => {
     }
 });
 
+async function checkHash() {
+    const hash = window.location.hash.substring(1);
+    if (hash && hash !== currentStationId) {
+        try {
+            const response = await fetch(`/stations/${hash}`);
+            if (response.ok) {
+                const data = await response.json();
+                selectStation(data.id, data.name, false);
+            }
+        } catch (err) {
+            console.error('Error loading station from hash:', err);
+        }
+    }
+}
+
+window.addEventListener('hashchange', checkHash);
+
 // Initial load
 loadStations();
+checkHash();
