@@ -121,4 +121,5 @@ p {
     font-weight: 600;
     margin-bottom: 1rem;
     border: 1px solid rgba(99, 102, 241, 0.2);
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.1);
 }

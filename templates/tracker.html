@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Transit Tracker</title>
+    <link rel="stylesheet" href="/static/tracker.css">
+</head>
+<body class="tracker-body">
+    <nav class="tracker-nav">
+        <div class="nav-content">
+            <a href="/" class="nav-brand">Transit API</a>
+            <div class="nav-links">
+                <a href="/swagger-ui">Docs</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="tracker-main">
+        <header class="tracker-header">
+            <h1>Live Station Tracker</h1>
+            <p>Select a station to view real-time departures and ETAs.</p>
+        </header>
+
+        <section class="station-selection">
+            <div class="search-container">
+                <input type="text" id="station-search" placeholder="Search for a station..." autocomplete="off">
+                <div id="search-results" class="search-results hidden"></div>
+            </div>
+        </section>
+
+        <section id="arrivals-section" class="arrivals-section hidden">
+            <div class="station-info">
+                <h2 id="current-station-name">Station Name</h2>
+                <span id="refresh-indicator" class="badge">Live</span>
+            </div>
+            <div id="arrivals-list" class="arrivals-list">
+                <!-- Loaded dynamically -->
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/tracker.js"></script>
+</body>
+</html>
